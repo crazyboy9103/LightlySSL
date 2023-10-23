@@ -1,0 +1,6 @@
+.python-version
+
+data/
+__pycache__/
+checkpoints/
+wandb/
