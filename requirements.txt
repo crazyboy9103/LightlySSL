@@ -1,0 +1,8 @@
+ipykernel==6.25.2
+pytorch-lightning==2.1.0
+timm==0.9.7
+torch==2.1.0+cu118
+torchmetrics==1.2.0
+torchvision==0.16.0+cu118
+tqdm==4.66.1
+wandb==0.15.12
