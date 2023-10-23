@@ -1,5 +1,7 @@
 ipykernel==6.25.2
-pytorch-lightning==2.1.0
+lightly==1.4.21
+lightning==2.1.0
+PyYAML==6.0.1
 timm==0.9.7
 torch==2.1.0+cu118
 torchmetrics==1.2.0
