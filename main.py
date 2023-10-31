@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 
 from dataset import dataset_builder
 from backbone import backbone_builder
@@ -13,15 +13,8 @@ from configs import barlowtwins, byol, dino, moco, simclr, swav, vicreg
 from configs.base import train_config, optimizer_config, eval_optimizer_config
 from modules import EvalModule
 
-def trainer_builder(checkpoint_path, project_name, experiment_name, metric_name, epochs):
+def trainer_builder(checkpoint_path, logger, metric_name, epochs):
     os.makedirs(checkpoint_path, exist_ok=True)
-    
-    logger = WandbLogger(
-        project=project_name,
-        name=experiment_name,
-        log_model=False,
-        save_dir="."
-    )  
     
     trainer = pl.Trainer(
         logger=logger, 
@@ -34,7 +27,7 @@ def trainer_builder(checkpoint_path, project_name, experiment_name, metric_name,
         ],
         fast_dev_run = False,
         sync_batchnorm=True,
-        devices=[0, 1, 2, 3],
+        devices=train_config["devices"],
     )
     return trainer
 
@@ -52,6 +45,16 @@ def main():
         train_config["dataset"], 
         train_config["data_root"], 
         train_config["seed"]
+    )
+
+    logger = WandbLogger(
+        project="ssl-lightly",
+        name=f'{train_config["ssl"]}_{train_config["backbone"]}_{train_config["dataset"]}',
+        log_model=False,
+        save_dir="."
+    ) if train_config["wandb"] else TensorBoardLogger(
+        save_dir="./tb_logs",
+        name=f'{train_config["ssl"]}_{train_config["backbone"]}_{train_config["dataset"]}',
     )
     
     def ssl_experiment():
@@ -88,11 +91,9 @@ def main():
             case _:
                 raise NotImplementedError
         
-        
         ssl_trainer = trainer_builder(
             f'./checkpoints/ssl/{train_config["ssl"]}/{train_config["backbone"]}/{train_config["dataset"]}', 
-            "ssl-lightly",
-            f'{train_config["ssl"]}_{train_config["backbone"]}_{train_config["dataset"]}',
+            logger,
             "valid-ssl-loss",
             train_config["ssl_epochs"]
         )
@@ -134,8 +135,7 @@ def main():
         
         sl_trainer = trainer_builder(
             f'./checkpoints/sl/{train_config["sl"]}/{train_config["backbone"]}/{train_config["dataset"]}', 
-            "ssl-lightly",
-            f'{train_config["sl"]}_{train_config["backbone"]}_{train_config["dataset"]}',
+            logger,
             "valid-accuracy",
             train_config["sl_epochs"]
         )

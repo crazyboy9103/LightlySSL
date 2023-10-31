@@ -1,4 +1,5 @@
 import torch 
+from lightning.pytorch.accelerators import find_usable_cuda_devices
 
 train_config = dict(
     backbone = "resnet50",
@@ -14,8 +15,9 @@ train_config = dict(
     sl_lr = 1e-4,
     sl = "linear", # "linear", "finetune"
     ssl = "barlowtwins", # "barlowtwins", "byol", "dino", "moco", "simclr", "swav", "vicreg"
-    wandb = True,
-    experiment = "train+eval" # "train", "eval", "train+eval"
+    wandb = False,
+    experiment = "train+eval", # "train", "eval", "train+eval"
+    devices = find_usable_cuda_devices(2)
 )
 
 optimizer_config = dict(
