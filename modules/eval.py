@@ -21,7 +21,14 @@ class EvalModule(BaseModule):
         if eval_type == "linear":
             deactivate_requires_grad(backbone)
             
-        super().__init__(backbone, optimizer, optimizer_kwargs, scheduler, scheduler_kwargs, linear_head=nn.Linear(backbone.output_dim, num_classes))
+        super().__init__(
+            backbone, 
+            optimizer, 
+            optimizer_kwargs, 
+            scheduler, 
+            scheduler_kwargs, 
+            linear_head=nn.Linear(backbone.output_dim, num_classes)
+        )
         
         metric_kwargs = dict(
             task = "multiclass",
@@ -35,18 +42,22 @@ class EvalModule(BaseModule):
         
     def forward(self, x):
         return self.linear(self.backbone(x))
-        
-    def training_step(self, batch, batch_index):
+    
+    def _step(self, batch, batch_index):
         x, y = batch
         yhat = self.forward(x)
         loss = F.cross_entropy(yhat, y)
+        return yhat, loss
+    
+    def training_step(self, batch, batch_index):
+        yhat, loss = self._step(batch, batch_index)
         self.log(f"{self.eval_type}-train-loss", loss)
         return loss
     
     def validation_step(self, batch, batch_index):
-        x, y = batch
-        yhat = self.forward(x)
-        self.accumulate_metrics(yhat, y)
+        yhat, loss = self._step(batch, batch_index)
+        self.log(f"{self.eval_type}-valid-loss", loss)
+        self.accumulate_metrics(yhat, batch[1])
     
     def on_validation_epoch_end(self):
         metrics = self.metrics()

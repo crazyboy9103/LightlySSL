@@ -21,14 +21,14 @@ class BarlowTwins(BaseModule):
             optimizer_kwargs, 
             scheduler, 
             scheduler_kwargs, 
-            BarlowTwinsProjectionHead(
+            projection_head=BarlowTwinsProjectionHead(
                 backbone.output_dim, 
                 projection_head_kwargs["hidden_dim"],
                 projection_head_kwargs["output_dim"]
             )
         )
         
-        self.criterion = BarlowTwinsLoss()
+        self.criterion = BarlowTwinsLoss() # gather_distributed=True if torch.cuda.device_count() > 1 else False)
         
         self.save_hyperparameters(projection_head_kwargs)
         
@@ -42,5 +42,5 @@ class BarlowTwins(BaseModule):
         z0 = self.forward(x0)
         z1 = self.forward(x1)
         loss = self.criterion(z0, z1)
-        self.log("train-loss", loss)
+        self.log("train-ssl-loss", loss)
         return loss

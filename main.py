@@ -11,7 +11,6 @@ from backbone import backbone_builder
 from modules import BarlowTwins, BYOL, DINO, MoCo, SimCLR, SwAV, VICReg
 from configs import barlowtwins, byol, dino, moco, simclr, swav, vicreg
 from configs.base import train_config, optimizer_config, eval_optimizer_config
-
 from modules import EvalModule
 
 def trainer_builder(checkpoint_path, project_name, experiment_name, metric_name, epochs):
@@ -33,7 +32,9 @@ def trainer_builder(checkpoint_path, project_name, experiment_name, metric_name,
         callbacks=[
             ModelCheckpoint(dirpath=checkpoint_path, save_top_k=2, monitor=metric_name, mode="max"),
         ],
-        fast_dev_run = True
+        fast_dev_run = False,
+        sync_batchnorm=True,
+        devices=[0, 1, 2, 3],
     )
     return trainer
 
@@ -166,7 +167,7 @@ def main():
             val_dataloaders=valid_loader,
         )
     
-    if "ssl" in train_config["experiment"]:
+    if "train" in train_config["experiment"]:
         ssl_experiment()
     
     if "eval" in train_config["experiment"]:

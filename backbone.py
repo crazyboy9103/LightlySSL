@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from torchvision import models
 import timm
 
 AVAILABLE_BACKBONES = [
@@ -23,10 +24,12 @@ AVAILABLE_BACKBONES = [
 def backbone_builder(backbone_name, checkpoint_path=""):
     assert backbone_name in AVAILABLE_BACKBONES
     backbone = timm.create_model(backbone_name)
+    # backbone = models.__dict__[backbone_name]()
     
     if "convnext" in backbone_name:
         backbone.head = nn.Sequential(*tuple(backbone.head.children())[:3])
-    
+        # backbone.classifier = nn.Identity()
+
     elif "resnet" in backbone_name or "resnext" in backbone_name:
         backbone.fc = nn.Identity()
     

@@ -2,6 +2,7 @@ from functools import partial
 from typing import Dict, Any, Optional, Type
 
 import pytorch_lightning as pl
+import torch
 from torch import nn
 
 class BaseModule(pl.LightningModule):
@@ -38,10 +39,15 @@ class BaseModule(pl.LightningModule):
         )
         if hasattr(self, "scheduler"):
             scheduler = self.scheduler(optim)
+            scheduler = {
+                "scheduler": scheduler,
+                "interval": "step",
+            }
             return [optim], [scheduler]
         
         return optim
     
     def validation_step(self, batch, batch_index):
-        valid_loss = self.training_step(batch, batch_index)
-        self.log("valid-ssl-loss", valid_loss, prog_bar=True)
+        with torch.no_grad():
+            valid_loss = self.training_step(batch, batch_index)
+        self.log("valid-ssl-loss", valid_loss)

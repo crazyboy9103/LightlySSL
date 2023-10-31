@@ -22,19 +22,18 @@ class SwAV(BaseModule):
             optimizer_kwargs, 
             scheduler, 
             scheduler_kwargs, 
-            SwaVProjectionHead(
+            projection_head=SwaVProjectionHead(
                 backbone.output_dim, 
                 projection_head_kwargs["hidden_dim"], 
                 projection_head_kwargs["output_dim"]
             ),
-            None,
-            SwaVPrototypes(
+            prototypes=SwaVPrototypes(
                 projection_head_kwargs["output_dim"], 
                 n_prototypes=prototype_kwargs["n_prototypes"]
             )
         )
         
-        self.criterion = SwaVLoss()
+        self.criterion = SwaVLoss(sinkhorn_gather_distributed=True if torch.cuda.device_count() > 1 else False)
         
         self.save_hyperparameters(projection_head_kwargs)
         self.save_hyperparameters(prototype_kwargs)
@@ -53,5 +52,5 @@ class SwAV(BaseModule):
         high_resolution = multi_crop_features[:2]
         low_resolution = multi_crop_features[2:]
         loss = self.criterion(high_resolution, low_resolution)
-        self.log("train-loss", loss)
+        self.log("train-ssl-loss", loss)
         return loss

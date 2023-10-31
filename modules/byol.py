@@ -25,12 +25,12 @@ class BYOL(BaseModule):
             optimizer_kwargs, 
             scheduler, 
             scheduler_kwargs, 
-            BYOLProjectionHead(
+            projection_head=BYOLProjectionHead(
                 backbone.output_dim, 
                 projection_head_kwargs["hidden_dim"], 
                 projection_head_kwargs["output_dim"]
             ),
-            BYOLPredictionHead(
+            prediction_head=BYOLPredictionHead(
                 projection_head_kwargs["output_dim"],  
                 prediction_head_kwargs["hidden_dim"],
                 prediction_head_kwargs["output_dim"]
@@ -70,5 +70,5 @@ class BYOL(BaseModule):
         p1 = self.forward(x1)
         z1 = self.forward_momentum(x1)
         loss = 0.5 * (self.criterion(p0, z1) + self.criterion(p1, z0))
-        self.log("train-loss", loss)
+        self.log("train-ssl-loss", loss)
         return loss

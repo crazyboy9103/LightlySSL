@@ -21,7 +21,7 @@ class VICReg(BaseModule):
             optimizer_kwargs, 
             scheduler, 
             scheduler_kwargs, 
-            VICRegProjectionHead(
+            projection_head=VICRegProjectionHead(
                 backbone.output_dim, 
                 projection_head_kwargs["hidden_dim"], 
                 projection_head_kwargs["output_dim"],
@@ -29,7 +29,7 @@ class VICReg(BaseModule):
             )
         )
         
-        self.criterion = VICRegLoss()
+        self.criterion = VICRegLoss(gather_distributed=True if torch.cuda.device_count() > 1 else False)
         
         self.save_hyperparameters(projection_head_kwargs)
         
@@ -43,5 +43,5 @@ class VICReg(BaseModule):
         z0 = self.forward(x0)
         z1 = self.forward(x1)
         loss = self.criterion(z0, z1)
-        self.log("train-loss", loss)
+        self.log("train-ssl-loss", loss)
         return loss
