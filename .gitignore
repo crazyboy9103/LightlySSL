@@ -9,3 +9,4 @@ tb_logs/
 lightning_logs/
 test*
 utils.py
+*.tar.gz

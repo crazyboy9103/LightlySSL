@@ -53,7 +53,11 @@ def main():
         train_config["seed"]
     )
 
-    logger = None
+    logger = TensorBoardLogger(
+        save_dir="./tb_logs",
+        name=f'{train_config["ssl"]}_{train_config["backbone"]}_{train_config["dataset"]}',
+        default_hp_metric=False
+    )
     # WandbLogger(
     #     project="ssl-lightly",
     #     name=f'{train_config["ssl"]}_{train_config["backbone"]}_{train_config["dataset"]}',

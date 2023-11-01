@@ -27,7 +27,17 @@ RUN wget https://bootstrap.pypa.io/get-pip.py \
     && rm get-pip.py
 
 WORKDIR /workspace
-COPY . /workspace
+# COPY . /workspace
 
 RUN pip install --upgrade pip && \ 
-    pip install -r requirements.txt
+    pip install ipykernel \
+                lightly \
+                lightning \ 
+                PyYAML \
+                timm \
+                torch \
+                torchmetrics \
+                torchvision \
+                tqdm \
+                wandb \
+                tensorboard
