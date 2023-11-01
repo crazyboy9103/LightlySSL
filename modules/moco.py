@@ -42,7 +42,7 @@ class MoCo(BaseModule):
 
         # create our loss with the optional memory bank
         self.criterion = NTXentLoss(
-            loss_kwargs["memory_bank_size"],
+            memory_bank_size=loss_kwargs["memory_bank_size"],
             gather_distributed=True if torch.cuda.device_count() > 1 else False
         )
         

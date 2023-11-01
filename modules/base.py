@@ -50,4 +50,4 @@ class BaseModule(pl.LightningModule):
     def validation_step(self, batch, batch_index):
         with torch.no_grad():
             valid_loss = self.training_step(batch, batch_index)
-        self.log("valid-ssl-loss", valid_loss)
+        self.log("valid-ssl-loss", valid_loss.cpu().item(), sync_dist=True)

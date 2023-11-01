@@ -62,7 +62,8 @@ class EvalModule(BaseModule):
     def on_validation_epoch_end(self):
         metrics = self.metrics()
         confmat = metrics.pop("confmat")
-        print(confmat)
+        if self.trainer.is_global_zero:
+            print(confmat)
         
         for k, v in metrics.items():
             self.log(f"valid-{k}", v, on_epoch=True)

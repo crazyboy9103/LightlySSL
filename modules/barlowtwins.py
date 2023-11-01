@@ -42,5 +42,5 @@ class BarlowTwins(BaseModule):
         z0 = self.forward(x0)
         z1 = self.forward(x1)
         loss = self.criterion(z0, z1)
-        self.log("train-ssl-loss", loss)
+        self.log("train-ssl-loss", loss.cpu().item(), sync_dist=True)
         return loss
