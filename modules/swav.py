@@ -33,7 +33,7 @@ class SwAV(BaseModule):
             )
         )
         
-        self.criterion = SwaVLoss(sinkhorn_gather_distributed=True if torch.cuda.device_count() > 1 else False)
+        self.criterion = SwaVLoss(sinkhorn_gather_distributed=self.is_distributed)
         
         self.save_hyperparameters(projection_head_kwargs)
         self.save_hyperparameters(prototype_kwargs)
@@ -52,5 +52,5 @@ class SwAV(BaseModule):
         high_resolution = multi_crop_features[:2]
         low_resolution = multi_crop_features[2:]
         loss = self.criterion(high_resolution, low_resolution)
-        self.log("train-ssl-loss", loss)
+        self.log("train-ssl-loss", loss, sync_dist=self.is_distributed)
         return loss

@@ -34,22 +34,28 @@ class SubsetWrapper(Dataset):
 def transform_builder(SSL, input_size, normalize):
     SSL = SSL.lower()
     
+    gaussian_blur = 0.0
+    cj_strength = 0.5
     if "byol" in SSL or "barlow" in SSL:
         transform = BYOLTransform(
             BYOLView1Transform(
                 input_size = input_size,
-                normalize = normalize
+                normalize = normalize,
+                gaussian_blur = gaussian_blur
             ),
             BYOLView2Transform(
                 input_size = input_size,
-                normalize = normalize
+                normalize = normalize,
+                gaussian_blur = gaussian_blur
             ),
         )
 
     elif "dino" in SSL:
         transform = DINOTransform(
             global_crop_size = input_size,
-            normalize = normalize
+            normalize = normalize,
+            n_local_views = 0, 
+            gaussian_blur = (gaussian_blur,) * 3
         )   
     
     elif "moco" in SSL:
@@ -61,20 +67,28 @@ def transform_builder(SSL, input_size, normalize):
     elif "swav" in SSL:
         transform = SwaVTransform(
             # TODO different crop sizes for different views
-            crop_sizes = (input_size, input_size),
+            crop_sizes = [input_size],
+            crop_counts = [2],
+            crop_min_scales = [0.14],
+            cj_strength = cj_strength,
+            gaussian_blur = gaussian_blur,
             normalize = normalize
         )
 
     elif "simclr" in SSL:
         transform = SimCLRTransform(
             input_size = input_size,
-            normalize = normalize
+            normalize = normalize,
+            cj_strength = cj_strength, 
+            gaussian_blur = gaussian_blur
         )
         
     elif "vicreg" in SSL:
         transform = VICRegTransform(
             input_size = input_size,
-            normalize = normalize
+            normalize = normalize,
+            cj_strength = cj_strength, 
+            gaussian_blur = gaussian_blur
         )
         
     return transform

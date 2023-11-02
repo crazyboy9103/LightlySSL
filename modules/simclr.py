@@ -26,7 +26,7 @@ class SimCLR(BaseModule):
                 projection_head_kwargs["output_dim"]
             )
         )
-        self.criterion = NTXentLoss(gather_distributed=True if torch.cuda.device_count() > 1 else False)
+        self.criterion = NTXentLoss(gather_distributed=self.is_distributed)
         
         self.save_hyperparameters(projection_head_kwargs)
         
@@ -40,5 +40,5 @@ class SimCLR(BaseModule):
         z0 = self.forward(x0)
         z1 = self.forward(x1)
         loss = self.criterion(z0, z1)
-        self.log("train-ssl-loss", loss)
+        self.log("train-ssl-loss", loss, sync_dist=self.is_distributed)
         return loss

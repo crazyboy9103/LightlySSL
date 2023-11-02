@@ -51,22 +51,23 @@ class EvalModule(BaseModule):
     
     def training_step(self, batch, batch_index):
         yhat, loss = self._step(batch, batch_index)
-        self.log(f"{self.eval_type}-train-loss", loss)
+        self.log(f"{self.eval_type}-train-loss", loss, sync_dist=self.is_distributed)
         return loss
     
     def validation_step(self, batch, batch_index):
         yhat, loss = self._step(batch, batch_index)
-        self.log(f"{self.eval_type}-valid-loss", loss)
+        self.log(f"{self.eval_type}-valid-loss", loss, sync_dist=self.is_distributed)
         self.accumulate_metrics(yhat, batch[1])
     
     def on_validation_epoch_end(self):
         metrics = self.metrics()
         confmat = metrics.pop("confmat")
-        if self.trainer.is_global_zero:
-            print(confmat)
+        # TODO log & visualize confmat
+        # if self.trainer.is_global_zero:
+        #     print(confmat)
         
         for k, v in metrics.items():
-            self.log(f"valid-{k}", v, on_epoch=True)
+            self.log(f"valid-{k}", v, sync_dist=self.is_distributed)
             
         self.reset_metrics()
     

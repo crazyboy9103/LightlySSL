@@ -43,7 +43,7 @@ class MoCo(BaseModule):
         # create our loss with the optional memory bank
         self.criterion = NTXentLoss(
             memory_bank_size=loss_kwargs["memory_bank_size"],
-            gather_distributed=True if torch.cuda.device_count() > 1 else False
+            gather_distributed=self.is_distributed
         )
         
         self.save_hyperparameters(projection_head_kwargs)
@@ -67,5 +67,5 @@ class MoCo(BaseModule):
         query = self.forward(x_query)
         key = self.forward_momentum(x_key)
         loss = self.criterion(query, key)
-        self.log("train-ssl-loss", loss)
+        self.log("train-ssl-loss", loss, sync_dist=self.is_distributed)
         return loss

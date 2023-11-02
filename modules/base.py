@@ -26,6 +26,8 @@ class BaseModule(pl.LightningModule):
         self.prototypes = prototypes
         self.linear = linear_head
         
+        self.is_distributed = torch.cuda.device_count() > 1
+
         self.optimizer = partial(optimizer, **optimizer_kwargs)
         self.save_hyperparameters(optimizer_kwargs)
 
@@ -50,4 +52,4 @@ class BaseModule(pl.LightningModule):
     def validation_step(self, batch, batch_index):
         with torch.no_grad():
             valid_loss = self.training_step(batch, batch_index)
-        self.log("valid-ssl-loss", valid_loss.cpu().item(), sync_dist=True)
+        self.log("valid-ssl-loss", valid_loss, sync_dist=self.is_distributed)

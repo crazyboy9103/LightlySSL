@@ -9,9 +9,9 @@ from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 
 from dataset import dataset_builder
 from backbone import backbone_builder
-from modules import BarlowTwins, BYOL, DINO, MoCo, SimCLR, SwAV, VICReg
-from configs import barlowtwins, byol, dino, moco, simclr, swav, vicreg
 from configs.base import train_config, optimizer_config, eval_optimizer_config
+from configs import barlowtwins, byol, dino, moco, simclr, swav, vicreg
+from modules import BarlowTwins, BYOL, DINO, MoCo, SimCLR, SwAV, VICReg
 from modules import EvalModule
 
 def trainer_builder(checkpoint_path, logger, metric_name, metric_mode, epochs):
@@ -21,19 +21,20 @@ def trainer_builder(checkpoint_path, logger, metric_name, metric_mode, epochs):
         logger=logger, 
         max_epochs=epochs,
         precision="32",
-        benchmark=False,
-        deterministic=True,
+        benchmark=True,
+        # deterministic=True,
         callbacks=[
             ModelCheckpoint(dirpath=checkpoint_path, save_top_k=2, monitor=metric_name, mode=metric_mode),
             ModelSummary(max_depth=-1),
             EarlyStopping(monitor=metric_name, patience=10, mode=metric_mode, verbose=True)
         ],
         fast_dev_run = False,
-        sync_batchnorm=False,
+        sync_batchnorm=True,
         devices=train_config["devices"],
         log_every_n_steps=1,
         strategy="auto", # "ddp_find_unused_parameters_true",
         num_sanity_val_steps=0,
+        use_distributed_sampler = True,
     )
     return trainer
 
@@ -53,21 +54,16 @@ def main():
         train_config["seed"]
     )
 
-    logger = TensorBoardLogger(
+    logger = WandbLogger(
+        project="ssl-lightly",
+        name=f'{train_config["ssl"]}_{train_config["backbone"]}_{train_config["dataset"]}',
+        log_model=False,
+        save_dir="."
+    ) if train_config["wandb"] else TensorBoardLogger(
         save_dir="./tb_logs",
         name=f'{train_config["ssl"]}_{train_config["backbone"]}_{train_config["dataset"]}',
         default_hp_metric=False
     )
-    # WandbLogger(
-    #     project="ssl-lightly",
-    #     name=f'{train_config["ssl"]}_{train_config["backbone"]}_{train_config["dataset"]}',
-    #     log_model=False,
-    #     save_dir="."
-    # ) if train_config["wandb"] else TensorBoardLogger(
-    #     save_dir="./tb_logs",
-    #     name=f'{train_config["ssl"]}_{train_config["backbone"]}_{train_config["dataset"]}',
-    #     default_hp_metric=False
-    # )
     
     def ssl_experiment():
         config = optimizer_config

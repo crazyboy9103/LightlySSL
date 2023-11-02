@@ -70,5 +70,5 @@ class BYOL(BaseModule):
         p1 = self.forward(x1)
         z1 = self.forward_momentum(x1)
         loss = 0.5 * (self.criterion(p0, z1) + self.criterion(p1, z0))
-        self.log("train-ssl-loss", loss)
+        self.log("train-ssl-loss", loss, sync_dist=self.is_distributed)
         return loss

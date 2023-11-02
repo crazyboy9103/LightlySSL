@@ -3,18 +3,23 @@ import argparse
 import torch 
 from pytorch_lightning.accelerators import find_usable_cuda_devices
 
+from backbone import AVAILABLE_BACKBONES
+
 parser = argparse.ArgumentParser()
-parser.add_argument("--dataset", type=str, default="cifar10")
+parser.add_argument("--backbone", type=str, default="resnet50", choices=AVAILABLE_BACKBONES)
+parser.add_argument("--ssl", type=str, default="barlowtwins", choices=["barlowtwins", "byol", "dino", "moco", "simclr", "swav", "vicreg"])
+parser.add_argument("--sl", type=str, default="linear", choices=["linear", "finetune"])
+parser.add_argument("--dataset", type=str, default="stl10")
 parser.add_argument("--data_root", type=str, default="./data")
-parser.add_argument("--num_gpus", type=int, default=1)
+parser.add_argument("--num_gpus", type=int, default=4)
 args = parser.parse_args()
 
 
 train_config = dict(
-    backbone = "resnet50",
+    backbone = args.backbone,
     backbone_checkpoint = "",
     num_workers = 8,
-    batch_size = 512,
+    batch_size = 256,
     ssl_epochs = 100,
     sl_epochs = 100,
     seed = 2023,
@@ -22,11 +27,11 @@ train_config = dict(
     data_root = args.data_root, # "/media/research/C658FE8F58FE7E0D/datasets/imagenet",
     ssl_lr = 6e-2,
     sl_lr = 1e-4,
-    sl = "linear", # "linear", "finetune"
-    ssl = "barlowtwins", # "barlowtwins", "byol", "dino", "moco", "simclr", "swav", "vicreg"
-    wandb = False,
+    sl = args.sl, # "linear", "finetune"
+    ssl = args.ssl, # "barlowtwins", "byol", "dino", "moco", "simclr", "swav", "vicreg"
+    wandb = True,
     experiment = "train+eval", # "train", "eval", "train+eval"
-    devices = [0, 1] # find_usable_cuda_devices(args.num_gpus)
+    devices = find_usable_cuda_devices(args.num_gpus)
 )
 
 optimizer_config = dict(

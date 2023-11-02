@@ -72,7 +72,7 @@ class DINO(BaseModule):
         teacher_out = [self.forward_teacher(view) for view in global_views]
         student_out = [self.forward(view) for view in views]
         loss = self.criterion(teacher_out, student_out, epoch=self.current_epoch)
-        self.log("train-ssl-loss", loss)
+        self.log("train-ssl-loss", loss, sync_dist=self.is_distributed)
         return loss
 
     def on_after_backward(self):
