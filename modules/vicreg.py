@@ -22,10 +22,10 @@ class VICReg(BaseModule):
             scheduler, 
             scheduler_kwargs, 
             projection_head=VICRegProjectionHead(
-                backbone.output_dim, 
-                projection_head_kwargs["hidden_dim"], 
-                projection_head_kwargs["output_dim"],
-                projection_head_kwargs["num_layers"]
+                input_dim=backbone.output_dim, 
+                hidden_dim=projection_head_kwargs["hidden_dim"], 
+                output_dim=projection_head_kwargs["output_dim"],
+                num_layers=projection_head_kwargs["num_layers"]
             )
         )
         

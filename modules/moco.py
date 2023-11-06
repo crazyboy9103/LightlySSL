@@ -29,9 +29,9 @@ class MoCo(BaseModule):
             scheduler, 
             scheduler_kwargs, 
             projection_head=MoCoProjectionHead(
-                backbone.output_dim, 
-                projection_head_kwargs["hidden_dim"], 
-                projection_head_kwargs["output_dim"]
+                input_dim=backbone.output_dim, 
+                hidden_dim=projection_head_kwargs["hidden_dim"], 
+                output_dim=projection_head_kwargs["output_dim"]
             )
         )
         
@@ -42,6 +42,7 @@ class MoCo(BaseModule):
 
         # create our loss with the optional memory bank
         self.criterion = NTXentLoss(
+            temperature=loss_kwargs["temperature"],
             memory_bank_size=loss_kwargs["memory_bank_size"],
             gather_distributed=self.is_distributed
         )
@@ -60,7 +61,8 @@ class MoCo(BaseModule):
         return key    
     
     def training_step(self, batch, batch_index):
-        momentum = cosine_schedule(self.current_epoch, 10, 0.996, 1)
+        # momentum = cosine_schedule(self.current_epoch, 10, 0.996, 1)
+        momentum = 0.996
         update_momentum(self.backbone, self.backbone_momentum, m=momentum)
         update_momentum(self.projection_head, self.projection_head_momentum, m=momentum)
         x_query, x_key = batch[0]

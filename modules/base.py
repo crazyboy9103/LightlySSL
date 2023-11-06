@@ -37,14 +37,14 @@ class BaseModule(pl.LightningModule):
 
     def configure_optimizers(self):
         optim = self.optimizer(
-            filter(lambda x: x.requires_grad, self.parameters()),
+            filter(lambda param: param.requires_grad, self.parameters()),
         )
         if hasattr(self, "scheduler"):
             scheduler = self.scheduler(optim)
-            scheduler = {
-                "scheduler": scheduler,
-                "interval": "step",
-            }
+            # scheduler = {
+            #     "scheduler": scheduler,
+            #     "interval": "step",
+            # }
             return [optim], [scheduler]
         
         return optim
@@ -53,3 +53,5 @@ class BaseModule(pl.LightningModule):
         with torch.no_grad():
             valid_loss = self.training_step(batch, batch_index)
         self.log("valid-ssl-loss", valid_loss, sync_dist=self.is_distributed)
+        
+    

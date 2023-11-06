@@ -23,12 +23,12 @@ class SwAV(BaseModule):
             scheduler, 
             scheduler_kwargs, 
             projection_head=SwaVProjectionHead(
-                backbone.output_dim, 
-                projection_head_kwargs["hidden_dim"], 
-                projection_head_kwargs["output_dim"]
+                input_dim=backbone.output_dim, 
+                hidden_dim=projection_head_kwargs["hidden_dim"], 
+                output_dim=projection_head_kwargs["output_dim"]
             ),
             prototypes=SwaVPrototypes(
-                projection_head_kwargs["output_dim"], 
+                input_dim=projection_head_kwargs["output_dim"], 
                 n_prototypes=prototype_kwargs["n_prototypes"]
             )
         )
@@ -48,7 +48,7 @@ class SwAV(BaseModule):
     def training_step(self, batch, batch_index):
         self.prototypes.normalize()
         views = batch[0]
-        multi_crop_features = [self.forward(view.to(self.device)) for view in views]
+        multi_crop_features = [self.forward(view) for view in views]
         high_resolution = multi_crop_features[:2]
         low_resolution = multi_crop_features[2:]
         loss = self.criterion(high_resolution, low_resolution)

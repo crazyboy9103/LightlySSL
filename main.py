@@ -10,7 +10,20 @@ from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from dataset import dataset_builder
 from backbone import backbone_builder
 from configs.base import train_config, optimizer_config, eval_optimizer_config
-from configs import barlowtwins, byol, dino, moco, simclr, swav, vicreg
+
+match train_config["dataset"]:
+    case "cifar10":
+        from configs.cifar10 import barlowtwins, byol, dino, moco, simclr, swav, vicreg
+    case "cifar100":
+        from configs.cifar100 import barlowtwins, byol, dino, moco, simclr, swav, vicreg
+    case "stl10":
+        from configs.stl10 import barlowtwins, byol, dino, moco, simclr, swav, vicreg
+    case "imagenet":
+        from configs.imagenet import barlowtwins, byol, dino, moco, simclr, swav, vicreg
+    case _:
+        raise NotImplementedError
+    
+# from configs import barlowtwins, byol, dino, moco, simclr, swav, vicreg
 from modules import BarlowTwins, BYOL, DINO, MoCo, SimCLR, SwAV, VICReg
 from modules import EvalModule
 
@@ -67,37 +80,29 @@ def main():
     
     def ssl_experiment():
         config = optimizer_config
-        match train_config["ssl"]:
-            case "barlowtwins":
-                config.update(barlowtwins.model_config)
-                model = BarlowTwins(backbone, **config)
-            
-            case "byol":
-                config.update(byol.model_config)
-                model = BYOL(backbone, **config)
-            
-            case "dino":
-                config.update(dino.model_config)
-                model = DINO(backbone, **config)
-            
-            case "moco":
-                config.update(moco.model_config)
-                model = MoCo(backbone, **config)
-            
-            case "simclr":
-                config.update(simclr.model_config)
-                model = SimCLR(backbone, **config)
-            
-            case "swav":
-                config.update(swav.model_config)
-                model = SwAV(backbone, **config)
-            
-            case "vicreg":
-                config.update(vicreg.model_config)
-                model = VICReg(backbone, **config)
-            
-            case _:
-                raise NotImplementedError
+        model_configs = {
+            "barlowtwins": barlowtwins.model_config,
+            "byol": byol.model_config,
+            "dino": dino.model_config,
+            "moco": moco.model_config,
+            "simclr": simclr.model_config,
+            "swav": swav.model_config,
+            "vicreg": vicreg.model_config,
+        }
+        
+        models = {
+            "barlowtwins": BarlowTwins,
+            "byol": BYOL,
+            "dino": DINO,
+            "moco": MoCo,
+            "simclr": SimCLR,
+            "swav": SwAV,
+            "vicreg": VICReg,
+        }
+        
+        ssl = train_config["ssl"]
+        config.update(model_configs[ssl])
+        model = models[ssl](backbone, **config)
         
         ssl_trainer = trainer_builder(
             f'./checkpoints/ssl/{train_config["ssl"]}/{train_config["backbone"]}/{train_config["dataset"]}', 
@@ -135,6 +140,8 @@ def main():
             train_dataloaders=train_loader,
             val_dataloaders=valid_loader,
         )
+        
+        
     
     def sl_experiment():
         eval_module = EvalModule(
@@ -145,7 +152,7 @@ def main():
         )
         
         sl_trainer = trainer_builder(
-            f'./checkpoints/sl/{train_config["sl"]}/{train_config["backbone"]}/{train_config["dataset"]}', 
+            f'./checkpoints/sl/{train_config["ssl"]}/{train_config["sl"]}/{train_config["backbone"]}/{train_config["dataset"]}', 
             logger,
             "valid-accuracy",
             "max",

@@ -59,11 +59,17 @@ def transform_builder(SSL, input_size, normalize):
         )   
     
     elif "moco" in SSL:
-        transform = MoCoV2Transform(
+        # transform = MoCoV2Transform(
+        #     input_size = input_size,
+        #     normalize = normalize
+        # )     
+        transform = SimCLRTransform(
             input_size = input_size,
-            normalize = normalize
-        )     
-
+            normalize = normalize,
+            cj_strength = cj_strength, 
+            gaussian_blur = gaussian_blur
+        )
+        
     elif "swav" in SSL:
         transform = SwaVTransform(
             # TODO different crop sizes for different views

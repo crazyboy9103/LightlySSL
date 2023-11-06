@@ -26,27 +26,37 @@ class DINO(BaseModule):
             scheduler, 
             scheduler_kwargs, 
             projection_head=DINOProjectionHead(
-                backbone.output_dim, 
-                projection_head_kwargs["hidden_dim"], 
-                projection_head_kwargs["bottleneck_dim"],
-                projection_head_kwargs["output_dim"],
+                input_dim=backbone.output_dim, 
+                hidden_dim=projection_head_kwargs["hidden_dim"], 
+                bottleneck_dim=projection_head_kwargs["bottleneck_dim"],
+                output_dim=projection_head_kwargs["output_dim"],
+                batch_norm=projection_head_kwargs["batch_norm"],
+                freeze_last_layer=projection_head_kwargs["freeze_last_layer"],
+                norm_last_layer=projection_head_kwargs["norm_last_layer"]
             )
         )
         
         self.teacher_backbone = copy.deepcopy(backbone)
         self.teacher_projection_head = DINOProjectionHead(
-            backbone.output_dim, 
-            projection_head_kwargs["hidden_dim"], 
-            projection_head_kwargs["bottleneck_dim"],
-            projection_head_kwargs["output_dim"],
+            input_dim=backbone.output_dim, 
+            hidden_dim=projection_head_kwargs["hidden_dim"], 
+            bottleneck_dim=projection_head_kwargs["bottleneck_dim"],
+            output_dim=projection_head_kwargs["output_dim"],
+            batch_norm=projection_head_kwargs["batch_norm"],
+            freeze_last_layer=projection_head_kwargs["freeze_last_layer"],
+            norm_last_layer=projection_head_kwargs["norm_last_layer"]
         )
         
         deactivate_requires_grad(self.teacher_backbone)
         deactivate_requires_grad(self.teacher_projection_head)
-        
+
         self.criterion = DINOLoss(
-            projection_head_kwargs["output_dim"],
-            warmup_teacher_temp_epochs = loss_kwargs["warmup_teacher_temp_epochs"]
+            output_dim=projection_head_kwargs["output_dim"],
+            warmup_teacher_temp=loss_kwargs["warmup_teacher_temp"],
+            teacher_temp=loss_kwargs["teacher_temp"],
+            warmup_teacher_temp_epochs=loss_kwargs["warmup_teacher_temp_epochs"],
+            student_temp=loss_kwargs["student_temp"],
+            center_momentum=loss_kwargs["center_momentum"]
         )
         
         self.save_hyperparameters(projection_head_kwargs)
@@ -63,7 +73,9 @@ class DINO(BaseModule):
         return z
 
     def training_step(self, batch, batch_index):
-        momentum = cosine_schedule(self.current_epoch, 10, 0.996, 1)
+        # TO DO: check if this is a correct way of fetching max_epochs
+        # momentum = cosine_schedule(self.current_epoch, self.trainer.fit_loop.max_epochs, 0.996, 1)
+        momentum = 0.996
         update_momentum(self.backbone, self.teacher_backbone, m=momentum)
         update_momentum(self.projection_head, self.teacher_projection_head, m=momentum)
         views = batch[0]
