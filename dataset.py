@@ -16,6 +16,10 @@ from lightly.transforms.swav_transform import SwaVTransform
 from lightly.transforms.simclr_transform import SimCLRTransform
 from lightly.transforms.vicreg_transform import VICRegTransform
 
+# TODO follow common practice in ssl 
+# Same trainset for ssl and sl
+# TODO handle transforms for different (ssl, dataset) combinations 
+
 class SubsetWrapper(Dataset):
     def __init__(self, subset, transform=None):
         self.subset = subset

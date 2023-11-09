@@ -11,6 +11,8 @@ import torch
 
 from .base import BaseModule
 
+# TODO check https://github.com/facebookresearch/moco for correct implementation
+
 class MoCo(BaseModule):
     def __init__(
         self, 
@@ -67,7 +69,24 @@ class MoCo(BaseModule):
         update_momentum(self.projection_head, self.projection_head_momentum, m=momentum)
         x_query, x_key = batch[0]
         query = self.forward(x_query)
-        key = self.forward_momentum(x_key)
+        with torch.no_grad():
+            x_key, shuffle = self._batch_shuffle(x_key)
+            key = self.forward_momentum(x_key)
+            key = self._batch_unshuffle(key, shuffle)
+        
         loss = self.criterion(query, key)
         self.log("train-ssl-loss", loss, sync_dist=self.is_distributed)
         return loss
+    
+    @torch.no_grad()
+    def _batch_shuffle(self, batch: torch.Tensor):
+        """Returns the shuffled batch and the indices to undo."""
+        batch_size = batch.shape[0]
+        shuffle = torch.randperm(batch_size, device=batch.device)
+        return batch[shuffle], shuffle
+    
+    @torch.no_grad()
+    def _batch_unshuffle(self, batch: torch.Tensor, shuffle: torch.Tensor):
+        """Returns the unshuffled batch."""
+        unshuffle = torch.argsort(shuffle)
+        return batch[unshuffle]

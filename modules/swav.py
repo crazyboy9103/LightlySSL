@@ -5,6 +5,7 @@ from lightly.models.modules import SwaVProjectionHead, SwaVPrototypes
 
 from .base import BaseModule
 
+# TODO add queue
 class SwAV(BaseModule):
     def __init__(
         self, 

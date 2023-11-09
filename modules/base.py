@@ -5,6 +5,10 @@ import pytorch_lightning as pl
 import torch
 from torch import nn
 
+# TODO add online classifier head
+#      lightly.utils.benchmarking.OnlineLinearClassifier only supports linear head
+#      may as well add kNN classifier
+
 class BaseModule(pl.LightningModule):
     def __init__(
         self, 
@@ -41,10 +45,6 @@ class BaseModule(pl.LightningModule):
         )
         if hasattr(self, "scheduler"):
             scheduler = self.scheduler(optim)
-            # scheduler = {
-            #     "scheduler": scheduler,
-            #     "interval": "step",
-            # }
             return [optim], [scheduler]
         
         return optim

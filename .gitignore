@@ -2,11 +2,9 @@
 
 data/
 __pycache__/
-checkpoints/
-checkpoint/
+checkpoint*/
 wandb/
-tb_logs/
-lightning_logs/
-test*
+*logs*/
+*test*
 utils.py
 *.tar.gz

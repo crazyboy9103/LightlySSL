@@ -23,11 +23,16 @@ match train_config["dataset"]:
     case _:
         raise NotImplementedError
     
-# from configs import barlowtwins, byol, dino, moco, simclr, swav, vicreg
 from modules import BarlowTwins, BYOL, DINO, MoCo, SimCLR, SwAV, VICReg
 from modules import EvalModule
 
-def trainer_builder(checkpoint_path, logger, metric_name, metric_mode, epochs):
+def trainer_builder(
+    checkpoint_path, 
+    logger, 
+    metric_name,
+    metric_mode, 
+    epochs
+):
     os.makedirs(checkpoint_path, exist_ok=True)
     
     trainer = pl.Trainer(
