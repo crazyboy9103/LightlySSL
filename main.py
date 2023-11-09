@@ -11,18 +11,6 @@ from dataset import dataset_builder
 from backbone import backbone_builder
 from configs.base import train_config, optimizer_config, eval_optimizer_config
 
-match train_config["dataset"]:
-    case "cifar10":
-        from configs.cifar10 import barlowtwins, byol, dino, moco, simclr, swav, vicreg
-    case "cifar100":
-        from configs.cifar100 import barlowtwins, byol, dino, moco, simclr, swav, vicreg
-    case "stl10":
-        from configs.stl10 import barlowtwins, byol, dino, moco, simclr, swav, vicreg
-    case "imagenet":
-        from configs.imagenet import barlowtwins, byol, dino, moco, simclr, swav, vicreg
-    case _:
-        raise NotImplementedError
-    
 from modules import BarlowTwins, BYOL, DINO, MoCo, SimCLR, SwAV, VICReg
 
 def trainer_builder(
@@ -39,7 +27,6 @@ def trainer_builder(
         max_epochs=epochs,
         precision="32",
         benchmark=True,
-        # deterministic=True,
         callbacks=[
             ModelCheckpoint(dirpath=checkpoint_path, save_top_k=2, monitor=metric_name, mode=metric_mode),
             ModelSummary(max_depth=-1),

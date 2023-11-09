@@ -34,21 +34,6 @@ train_config = dict(
     devices = find_usable_cuda_devices(args.num_gpus)
 )
 
-def builder(args):
-    match args.ssl:
-        case "barlowtwins":
-            config = dict(
-                lambd = 5e-3,
-                scale_loss = 0.025,
-                projection_dim = 256,
-                use_momentum = True,
-                momentum = 0.99,
-                weight_decay = 1e-6,
-            )
-        case "byol":
-            pass
-        
-
 
 # This is from lightly benchmark script
 BASE_BATCH_SIZE = 128

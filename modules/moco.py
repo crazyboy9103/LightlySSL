@@ -10,7 +10,7 @@ from lightly.utils.scheduler import cosine_schedule
 import torch 
 
 from .base import BaseModule
-
+from .eval import OnlineClassifier
 # TODO check https://github.com/facebookresearch/moco for correct implementation
 
 class MoCo(BaseModule):
@@ -23,6 +23,7 @@ class MoCo(BaseModule):
         scheduler_kwargs = dict(max_epochs=200),
         projection_head_kwargs = dict(hidden_dim=512, output_dim=128),
         loss_kwargs = dict(memory_bank_size=4096),
+        linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1, k=15),
     ):
         super().__init__(
             backbone, 
@@ -34,6 +35,12 @@ class MoCo(BaseModule):
                 input_dim=backbone.output_dim, 
                 hidden_dim=projection_head_kwargs["hidden_dim"], 
                 output_dim=projection_head_kwargs["output_dim"]
+            ),
+            linear_head=OnlineClassifier(
+                input_dim=backbone.output_dim, 
+                num_classes=linear_head_kwargs["num_classes"],
+                label_smoothing=linear_head_kwargs["label_smoothing"],
+                k=linear_head_kwargs["k"]
             )
         )
         
@@ -53,30 +60,38 @@ class MoCo(BaseModule):
         self.save_hyperparameters(loss_kwargs)
 
     def forward(self, x):
-        query = self.backbone(x).flatten(start_dim=1)
-        query = self.projection_head(query)
-        return query
+        z = self.backbone(x).flatten(start_dim=1)
+        query = self.projection_head(z)
+        return z, query
 
     def forward_momentum(self, x):
-        key = self.backbone_momentum(x).flatten(start_dim=1)
-        key = self.projection_head_momentum(key).detach()
-        return key    
+        z = self.backbone_momentum(x).flatten(start_dim=1)
+        key = self.projection_head_momentum(z).detach()
+        return z, key    
     
     def training_step(self, batch, batch_index):
-        # momentum = cosine_schedule(self.current_epoch, 10, 0.996, 1)
-        momentum = 0.996
+        momentum = cosine_schedule(
+            self.trainer.global_step, 
+            self.trainer.estimated_stepping_batches, 
+            start_value=0.996, 
+            end_value=1
+        )
         update_momentum(self.backbone, self.backbone_momentum, m=momentum)
         update_momentum(self.projection_head, self.projection_head_momentum, m=momentum)
-        x_query, x_key = batch[0]
-        query = self.forward(x_query)
+        (x_query, x_key), y = batch
+        z_query, query = self.forward(x_query)
         with torch.no_grad():
             x_key, shuffle = self._batch_shuffle(x_key)
-            key = self.forward_momentum(x_key)
+            _, key = self.forward_momentum(x_key)
             key = self._batch_unshuffle(key, shuffle)
         
         loss = self.criterion(query, key)
-        self.log("train-ssl-loss", loss, sync_dist=self.is_distributed)
-        return loss
+        loss_dict = {"train-ssl-loss": loss}
+        
+        cls_loss, cls_loss_dict = self.linear_head.training_step((z_query.detach(), y), batch_index)
+        loss_dict.update(cls_loss_dict)
+        self.log_dict(loss_dict, sync_dist=self.is_distributed)        
+        return loss + cls_loss
     
     @torch.no_grad()
     def _batch_shuffle(self, batch: torch.Tensor):

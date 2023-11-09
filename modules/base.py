@@ -28,7 +28,7 @@ class BaseModule(pl.LightningModule):
         self.projection_head = projection_head
         self.prediction_head = prediction_head
         self.prototypes = prototypes
-        self.linear = linear_head
+        self.linear_head = linear_head
         
         self.is_distributed = torch.cuda.device_count() > 1
 
@@ -38,7 +38,7 @@ class BaseModule(pl.LightningModule):
         if scheduler and scheduler_kwargs:
             self.scheduler = partial(scheduler, **scheduler_kwargs)
             self.save_hyperparameters(scheduler_kwargs)
-
+    
     def configure_optimizers(self):
         optim = self.optimizer(
             filter(lambda param: param.requires_grad, self.parameters()),
@@ -50,8 +50,16 @@ class BaseModule(pl.LightningModule):
         return optim
     
     def validation_step(self, batch, batch_index):
-        with torch.no_grad():
-            valid_loss = self.training_step(batch, batch_index)
-        self.log("valid-ssl-loss", valid_loss, sync_dist=self.is_distributed)
-        
+        x, y = batch
+        z = self.backbone(x).flatten(start_dim=1)
+        _, loss_dict = self.linear_head.validation_step((z, y), batch_index)
+        self.log_dict(loss_dict, sync_dist=self.is_distributed)
     
+    def on_validation_epoch_end(self):
+        metrics = self.linear_head.on_validation_epoch_end()
+        self.log_dict(metrics, sync_dist=self.is_distributed)
+    
+    def on_train_epoch_end(self):
+        metrics = self.linear_head.on_train_epoch_end()
+        self.log_dict(metrics, sync_dist=self.is_distributed)
+        

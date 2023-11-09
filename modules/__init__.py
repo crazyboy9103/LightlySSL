@@ -5,4 +5,3 @@ from .moco import MoCo
 from .simclr import SimCLR
 from .swav import SwAV
 from .vicreg import VICReg
-from .eval import EvalModule 
