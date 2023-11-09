@@ -24,7 +24,6 @@ match train_config["dataset"]:
         raise NotImplementedError
     
 from modules import BarlowTwins, BYOL, DINO, MoCo, SimCLR, SwAV, VICReg
-from modules import EvalModule
 
 def trainer_builder(
     checkpoint_path, 
@@ -65,21 +64,22 @@ def main():
         train_config["backbone_checkpoint"]
     )
     
-    train_data, finetune_data, test_data, ssl_transform, sl_transform = dataset_builder(
+    train_data, test_data, train_transform, test_transform = dataset_builder(
         train_config["ssl"], 
         train_config["dataset"], 
         train_config["data_root"], 
         train_config["seed"]
     )
 
+    experiment_name = f'{train_config["ssl"]}_{train_config["backbone"]}_{train_config["dataset"]}'
     logger = WandbLogger(
         project="ssl-lightly",
-        name=f'{train_config["ssl"]}_{train_config["backbone"]}_{train_config["dataset"]}',
+        name=experiment_name,
         log_model=False,
         save_dir="."
     ) if train_config["wandb"] else TensorBoardLogger(
         save_dir="./tb_logs",
-        name=f'{train_config["ssl"]}_{train_config["backbone"]}_{train_config["dataset"]}',
+        name=experiment_name,
         default_hp_metric=False
     )
     
@@ -117,58 +117,11 @@ def main():
             train_config["ssl_epochs"]
         )
     
-        train_data.transform = ssl_transform
-        finetune_data.transform = ssl_transform
+        train_data.transform = train_transform
+        test_data.transform = test_transform
 
         train_loader = DataLoader(
             train_data, 
-            batch_size=train_config["batch_size"], 
-            shuffle=True, 
-            num_workers=train_config["num_workers"], 
-            pin_memory=True,
-            generator=torch.Generator().manual_seed(train_config["seed"]),
-            drop_last=True
-        )
-        
-        valid_loader = DataLoader(
-            finetune_data, 
-            batch_size=train_config["batch_size"], 
-            shuffle=False, 
-            num_workers=train_config["num_workers"], 
-            pin_memory=True,
-            generator=torch.Generator().manual_seed(train_config["seed"]),
-            drop_last=True
-        )
-        
-        ssl_trainer.fit(
-            model, 
-            train_dataloaders=train_loader,
-            val_dataloaders=valid_loader,
-        )
-        
-        
-    
-    def sl_experiment():
-        eval_module = EvalModule(
-            backbone, 
-            eval_type = train_config["sl"],
-            num_classes = len(test_data.classes),
-            **eval_optimizer_config
-        )
-        
-        sl_trainer = trainer_builder(
-            f'./checkpoints/sl/{train_config["ssl"]}/{train_config["sl"]}/{train_config["backbone"]}/{train_config["dataset"]}', 
-            logger,
-            "valid-accuracy",
-            "max",
-            train_config["sl_epochs"]
-        )
-        
-        finetune_data.transform = sl_transform
-        test_data.transform = sl_transform
-        
-        train_loader = DataLoader(
-            finetune_data, 
             batch_size=train_config["batch_size"], 
             shuffle=True, 
             num_workers=train_config["num_workers"], 
@@ -187,17 +140,15 @@ def main():
             drop_last=True
         )
         
-        sl_trainer.fit(
-            eval_module, 
+        ssl_trainer.fit(
+            model, 
             train_dataloaders=train_loader,
             val_dataloaders=valid_loader,
         )
-    
+        
+        
     if "train" in train_config["experiment"]:
         ssl_experiment()
-    
-    if "eval" in train_config["experiment"]:
-        sl_experiment()   
 
 if __name__ == "__main__":
     main()
