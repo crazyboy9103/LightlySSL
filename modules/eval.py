@@ -1,52 +1,35 @@
+from typing import Literal
+
+from lightly.models.utils import deactivate_requires_grad
+
 import torch
 from torch import nn
 from torch.nn import functional as F
 import torchmetrics
 import pytorch_lightning as pl
 
-class OnlineClassifier(pl.LightningModule):
+class kNNClassifier(pl.LightningModule):
     def __init__(
-        self,
-        input_dim: int = 2048,
-        num_classes: int = 1000,
-        label_smoothing: float = 0.0,
-        k: int = 15,
-    ) -> None:
+        self, 
+        num_classes: int = 1000,    
+        k: int = 15
+    ):
         super().__init__()
-        self.head = nn.Linear(input_dim, num_classes)
-        self.label_smoothing = label_smoothing
         self.k = k
         
         metric_kwargs = dict(
             task = "multiclass",
             num_classes = num_classes,
         )
-
-        # for linear only (finetune excluded in on-the-fly eval for complexity)
+        
         self.accuracy = torchmetrics.Accuracy(**metric_kwargs)
-        self.f1 = torchmetrics.F1Score(average='weighted', **metric_kwargs)
+        self.f1 = torchmetrics.F1Score(average='macro', **metric_kwargs)
         
-        self.knn_accuracy = torchmetrics.Accuracy(**metric_kwargs)
-        self.knn_f1 = torchmetrics.F1Score(average='weighted', **metric_kwargs)
-        
+        # we accumulate the embeddings and labels for kNN predictions
         self.z_train = []
         self.y_train = []
     
-    def on_train_epoch_end(self):
-        return self._epoch_end("train")
-        
-    def on_validation_epoch_end(self):
-        # After validation, we would want to reset the parameters of the head (linear probe)
-        self.head.reset_parameters()
-        return self._epoch_end("valid")
-        
-    def _epoch_end(self, phase):
-        metrics = self.metrics(phase)
-        self.reset_metrics(phase)
-        return metrics 
-            
-    def accumulate_knn(self, z_hat, y):
-        # at train time, we accumulate the embeddings and labels
+    def accumulate(self, z_hat, y):
         if self.training:
             self.z_train.append(z_hat.detach())
             self.y_train.append(y.detach())
@@ -62,124 +45,201 @@ class OnlineClassifier(pl.LightningModule):
             knn_dists, knn_idxs = torch.topk(dists, k, dim=1, largest=False)
             knn_yhat = labels[knn_idxs].mode(dim=1).values
             
-            self.knn_accuracy(knn_yhat, y)
-            self.knn_f1(knn_yhat, y)
+            self.accuracy(knn_yhat, y)
+            self.f1(knn_yhat, y)
+    
+    def training_step(self, batch, batch_idx):
+        self.accumulate(*batch)
+
+    def validation_step(self, batch, batch_idx):
+        self.accumulate(*batch)
+    
+    def on_validation_epoch_end(self):
+        metrics = self.metrics()
+        self.reset_metrics()
+        return metrics 
+    
+    def reset_metrics(self):
+        self.accuracy.reset()
+        self.f1.reset()
+        
+        self.z_train = []
+        self.y_train = []
+        
+    def metrics(self):
+        # only valid for knn
+        return {
+            "valid/knn-accuracy": self.accuracy.compute(),
+            "valid/knn-f1": self.f1.compute()
+        }
+
+class LinearClassifier(pl.LightningModule):
+    def __init__(
+        self,
+        input_dim: int = 2048,
+        num_classes: int = 1000,
+        label_smoothing: float = 0.0,
+        eval_type: Literal["linear", "finetune"] = "linear",
+    ):
+        super().__init__()
+        self.head = nn.Linear(input_dim, num_classes)
+        self.label_smoothing = label_smoothing
+        self.eval_type = eval_type
+        
+        metric_kwargs = dict(
+            task = "multiclass",
+            num_classes = num_classes,
+        )
+
+        # for linear only (kNN, finetune excluded from on-the-fly eval)
+        self.accuracy = torchmetrics.Accuracy(**metric_kwargs)
+        self.f1 = torchmetrics.F1Score(average='macro', **metric_kwargs)
+        
+    def on_train_epoch_end(self):
+        metrics = self._epoch_end()
+        return {
+            f"train/{k}": v for k, v in metrics.items()
+        }
+        
+    def on_validation_epoch_end(self):
+        metrics = self._epoch_end()
+        return {
+            f"valid/{k}": v for k, v in metrics.items()
+        }
+        
+    def _epoch_end(self):
+        metrics = self.metrics()
+        self.reset_metrics()
+        return metrics 
             
-    def accumulate_linear(self, y_hat, y):
+    def accumulate(self, y_hat, y):
         self.accuracy(y_hat, y)
         self.f1(y_hat, y)
         
     def forward(self, z_hat, y):
-        z_hat = z_hat.detach().flatten(start_dim=1)
-        y_hat = self.head(z_hat)
+        if self.eval_type == "linear":
+            z_hat = z_hat.detach()
+            
+        y_hat = self.head(z_hat.flatten(start_dim=1))
         loss = F.cross_entropy(y_hat, y, label_smoothing=self.label_smoothing if self.training else 0.0)
-        return loss, y_hat, z_hat
+        return loss, y_hat
     
     def training_step(self, batch, batch_idx):
-        z_hat, y = batch
-        loss, y_hat, z_hat = self.forward(z_hat, y)
-        self.accumulate_linear(y_hat, y)
-        self.accumulate_knn(z_hat, y)
-        return loss, {"onlinelinear-train-loss": loss}
+        loss = self._step(batch, batch_idx)
+        return loss, {f"train/{self.eval_type}-loss": loss}
 
     def validation_step(self, batch, batch_idx):
+        loss = self._step(batch, batch_idx)
+        return loss, {f"valid/{self.eval_type}-loss": loss}
+    
+    def _step(self, batch, batch_index):
         z_hat, y = batch
-        loss, y_hat, z_hat = self.forward(z_hat, y)
-        self.accumulate_linear(y_hat, y)
-        self.accumulate_knn(z_hat, y)
-        return loss, {"onlinelinear-valid-loss": loss}
+        loss, y_hat = self.forward(z_hat, y)
+        self.accumulate(y_hat, y)
+        return loss
     
-    def reset_metrics(self, phase):
-        if phase == "train":
-            self.accuracy.reset()
-            self.f1.reset()
+    def reset_metrics(self):
+        self.accuracy.reset()
+        self.f1.reset()
         
-        elif phase == "valid":
-            self.accuracy.reset()
-            self.f1.reset()
-            self.knn_accuracy.reset()
-            self.knn_f1.reset()
-            self.z_train = []
-            self.y_train = []
-        
-    def metrics(self, phase):
-        # for train, we only compute linear/finetune metrics
-        if phase == "train":
-            return {
-                "accuracy": self.accuracy.compute(),
-                "f1": self.f1.compute()
-            }
-        
-        # for validation, we compute knn metrics too 
-        elif phase == "valid":
-            return {
-                "accuracy": self.accuracy.compute(),
-                "f1": self.f1.compute(),
-                "knn_accuracy": self.knn_accuracy.compute(),
-                "knn_f1": self.knn_f1.compute()
-            }
+    def metrics(self):
+        return {
+            f"{self.eval_type}-accuracy": self.accuracy.compute(),
+            f"{self.eval_type}-f1": self.f1.compute()
+        }
 
-# TODO: may not be needed
-# class EvalModule(BaseModule):
-#     def __init__(
-#         self, 
-#         backbone, 
-#         optimizer = torch.optim.SGD, 
-#         optimizer_kwargs = dict(lr=6e-2), 
-#         scheduler = None, 
-#         scheduler_kwargs = None,
-#         eval_type = "linear",
-#         num_classes = 10,
-#         label_smoothing: float = 0.0,        
-#         k: int = 15,
-#     ):
-#         if eval_type == "linear":
-#             deactivate_requires_grad(backbone)
-            
-#         super().__init__(
-#             backbone, 
-#             optimizer, 
-#             optimizer_kwargs, 
-#             scheduler, 
-#             scheduler_kwargs, 
-#             linear_head=OnlineClassifier(
-#                 backbone.output_dim, 
-#                 num_classes,
-#                 label_smoothing,
-#                 k,
-#                 eval_type
-#             )
-#         )
-
-#     def forward(self, x):
-#         zhat = self.backbone(x)
-#         return zhat
+class OnlineLinearClassifier(LinearClassifier):
+    def __init__(
+        self,
+        input_dim: int = 2048,
+        num_classes: int = 1000,
+        label_smoothing: float = 0.0,
+    ):
+        super().__init__(
+            input_dim = input_dim, 
+            num_classes = num_classes, 
+            label_smoothing = label_smoothing, 
+            eval_type = "linear"
+        )
+        
+    def on_validation_epoch_end(self):
+        # After validation, we would want to reset the parameters of the head (linear probe)
+        self.head.reset_parameters()
+        return self._epoch_end()
     
-#     def training_step(self, batch, batch_index):
-#         zhat = self.forward(batch[0])
-#         loss, loss_dict = self.linear.training_step(zhat, batch[1], batch_index)
-#         self.log_dict(loss_dict, sync_dist=self.is_distributed)
-#         return loss
+    def training_step(self, batch, batch_idx):
+        loss, loss_dict = super().training_step(batch, batch_idx)
+        return loss, {"train/online-linear-loss": loss_dict["train/linear-loss"]}
 
-#     def on_train_epoch_end(self):
-#         metrics = self.linear.on_train_epoch_end()
-#         self.log_dict(metrics, sync_dist=self.is_distributed)
+    def validation_step(self, batch, batch_idx):
+        loss, loss_dict = super().validation_step(batch, batch_idx)
+        return loss, {"valid/online-linear-loss": loss_dict["valid/linear-loss"]}
     
-#     def on_validation_epoch_end(self):
-#         metrics = self.linear.on_validation_epoch_end()
-#         self.log_dict(metrics, sync_dist=self.is_distributed)
+    def metrics(self):
+        return {
+            "online-linear-accuracy": self.accuracy.compute(),
+            "online-linear-f1": self.f1.compute()
+        }
         
-#     def validation_step(self, batch, batch_index):
-#         zhat = self.forward(batch[0])
-#         _, loss_dict = self.linear.validation_step(zhat, batch[1], batch_index)
-#         self.log_dict(loss_dict, sync_dist=self.is_distributed)
+class EvalModule(pl.LightningModule):
+    def __init__(
+        self, 
+        backbone, 
+        batch_size_per_device: int, 
+        num_classes: int = 1000,
+        eval_type: Literal["linear", "finetune"] = "linear",
+        label_smoothing: float = 0.0,
+        k: int = 15,
+    ):
+        super().__init__()
+        
+        self.backbone = backbone
+        self.batch_size_per_device = batch_size_per_device
+        self.linear_head = LinearClassifier(
+            input_dim = backbone.output_dim,
+            num_classes = num_classes,
+            label_smoothing = label_smoothing,
+            eval_type = eval_type,
+        )
+        self.knn_head = kNNClassifier(
+            num_classes = num_classes,
+            k = k,
+        )
+        
+        # TODO: may not need this
+        if eval_type == "linear":
+            deactivate_requires_grad(self.backbone)
+            self.backbone.eval()
+
+    def training_step(self, batch, batch_index):
+        x, y = batch
+        zhat = self.backbone(x)
+        loss, loss_dict = self.linear_head.training_step(zhat, y, batch_index)
+        self.knn_head.training_step(zhat, y, batch_index)
+        self.log_dict(loss_dict, sync_dist=self.is_distributed)
+        return loss
+
+    def on_train_epoch_end(self):
+        linear_metrics = self.linear_head.on_train_epoch_end()
+        knn_metrics = self.knn_head.on_train_epoch_end()
+        self.log_dict({**linear_metrics, **knn_metrics}, sync_dist=self.is_distributed)
+    
+    def on_validation_epoch_end(self):
+        linear_metrics = self.linear_head.on_validation_epoch_end()
+        knn_metrics = self.knn_head.on_validation_epoch_end()
+        self.log_dict({**linear_metrics, **knn_metrics}, sync_dist=self.is_distributed)
+        
+    def validation_step(self, batch, batch_index):
+        x, y = batch
+        zhat = self.backbone(x)
+        _, loss_dict = self.linear_head.validation_step(zhat, y, batch_index)
+        self.knn_head.validation_step(zhat, y, batch_index)
+        self.log_dict(loss_dict, sync_dist=self.is_distributed)
     
 if __name__ == "__main__":
-    classifier = OnlineClassifier(
+    classifier = LinearClassifier(
         input_dim=2048,
         num_classes=1000,
         label_smoothing=0.0,
-        k=15,
     )
-    for param in classifier.parameters():
-        print(param.shape, param.requires_grad)
+    print(classifier.__class__.__name__)

@@ -1,8 +1,7 @@
 import os
 
-from torchvision import datasets
-from torchvision import transforms as T
-from torch.utils.data import Dataset
+import pytorch_lightning as pl
+
 from lightly.transforms.byol_transform import (
     BYOLTransform, 
     BYOLView1Transform, 
@@ -13,6 +12,25 @@ from lightly.transforms.moco_transform import MoCoV2Transform
 from lightly.transforms.swav_transform import SwaVTransform
 from lightly.transforms.simclr_transform import SimCLRTransform
 from lightly.transforms.vicreg_transform import VICRegTransform
+
+from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
+from torchvision import datasets
+from torchvision import transforms as T
+
+class DataModule(pl.LightningDataModule):
+    def __init__(self, train_data, test_data, data_loader_kwargs):
+        super().__init__()
+        self.train_data = train_data
+        self.test_data = test_data
+        self.data_loader_kwargs = data_loader_kwargs
+    
+    def train_dataloader(self):
+        return DataLoader(self.train_data, shuffle=True, pin_memory=True, **self.data_loader_kwargs)
+
+    def val_dataloader(self):
+        return DataLoader(self.test_data, shuffle=False, pin_memory=True, **self.data_loader_kwargs)
+
 
 INPUT_SIZES = {
     "cifar10": 32,

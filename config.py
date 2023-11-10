@@ -4,9 +4,9 @@ def config_builder(args):
     train_config = dict(
         backbone = args.backbone,
         backbone_checkpoint = "",
-        num_workers = 8,
-        batch_size = 256,
-        ssl_epochs = 400,
+        num_workers = args.num_workers,
+        batch_size = args.batch_size,
+        ssl_epochs = args.ssl_epochs,
         seed = 2023,
         dataset = args.dataset, # "cifar10", "cifar100", "stl10", "imagenet",
         data_root = args.data_root, # "/media/research/C658FE8F58FE7E0D/datasets/imagenet",
@@ -35,10 +35,9 @@ def config_builder(args):
         
     
     model_config = dict(
-        linear_head_kwargs = dict(
+        online_linear_head_kwargs = dict(
             num_classes = num_classes, 
-            label_smoothing = 0,
-            k = 200,
+            label_smoothing = args.label_smoothing,
         )
     )
     
@@ -184,6 +183,8 @@ def config_builder(args):
                     output_dim = 2048,
                     num_layers = 3,
                 )
+        case _:
+            raise NotImplementedError(f"SSL {train_config['ssl']} not implemented.")
                
     return train_config, model_config
     

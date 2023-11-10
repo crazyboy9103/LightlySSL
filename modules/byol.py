@@ -12,7 +12,7 @@ from lightly.utils.scheduler import cosine_schedule
 from lightly.utils.scheduler import CosineWarmupScheduler
 
 from .base import BaseModule
-from .eval import OnlineClassifier
+from .eval import OnlineLinearClassifier
 
 class BYOL(BaseModule):
     def __init__(
@@ -21,7 +21,7 @@ class BYOL(BaseModule):
         batch_size_per_device,
         projection_head_kwargs = dict(hidden_dim=1024, output_dim=256),
         prediction_head_kwargs = dict(hidden_dim=1024, output_dim=256),
-        linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1, k=15),
+        online_linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1),
     ):
         super().__init__(
             backbone, 
@@ -34,9 +34,9 @@ class BYOL(BaseModule):
                 input_dim=projection_head_kwargs["output_dim"],  
                 **prediction_head_kwargs
             ),
-            linear_head=OnlineClassifier(
+            online_linear_head=OnlineLinearClassifier(
                 input_dim=backbone.output_dim, 
-                **linear_head_kwargs
+                **online_linear_head_kwargs
             )
         )
         
@@ -53,7 +53,7 @@ class BYOL(BaseModule):
         
         self.save_hyperparameters(projection_head_kwargs)
         self.save_hyperparameters(prediction_head_kwargs)
-        self.save_hyperparameters(linear_head_kwargs)
+        self.save_hyperparameters(online_linear_head_kwargs)
         
     def forward(self, x):
         z = self.backbone(x).flatten(start_dim=1)
@@ -67,7 +67,7 @@ class BYOL(BaseModule):
         y = y.detach()
         return y
     
-    def training_step(self, batch, batch_index):
+    def training_output(self, batch, batch_index):
         momentum = cosine_schedule(
             self.trainer.global_step, 
             self.trainer.estimated_stepping_batches, 
@@ -82,12 +82,11 @@ class BYOL(BaseModule):
         _, p1 = self.forward(x1)
         y1 = self.forward_momentum(x1)
         loss = 2 * (self.criterion(p0, y1) + self.criterion(p1, y0))
-        
-        cls_loss, cls_loss_dict = self.linear_head.training_step((z0.detach(), y), batch_index)
-        loss_dict = {"train-ssl-loss": loss}
-        loss_dict.update(cls_loss_dict)
-        self.log_dict(loss_dict, sync_dist=self.is_distributed)
-        return loss + cls_loss
+        return {
+            "loss": loss, 
+            "embedding": z0.detach(),
+            "target": y
+        }
 
     def configure_optimizers(self):
         # Don't use weight decay for batch norm, bias parameters, and classification
@@ -112,7 +111,7 @@ class BYOL(BaseModule):
                 },
                 {
                     "name": "online_classifier",
-                    "params": self.linear_head.parameters(),
+                    "params": self.online_linear_head.parameters(),
                     "weight_decay": 0.0,
                 },
             ],

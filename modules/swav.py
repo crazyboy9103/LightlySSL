@@ -6,7 +6,7 @@ from lightly.utils.lars import LARS
 from lightly.utils.scheduler import CosineWarmupScheduler
 
 from .base import BaseModule
-from .eval import OnlineClassifier
+from .eval import OnlineLinearClassifier
 # TODO add queue
 class SwAV(BaseModule):
     def __init__(
@@ -15,7 +15,7 @@ class SwAV(BaseModule):
         batch_size_per_device,
         projection_head_kwargs = dict(hidden_dim=512, output_dim=128),
         prototype_kwargs = dict(n_prototypes=512),
-        linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1, k=15),
+        online_linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1),
     ):
         super().__init__(
             backbone, 
@@ -28,9 +28,9 @@ class SwAV(BaseModule):
                 input_dim=projection_head_kwargs["output_dim"], 
                 **prototype_kwargs
             ),
-            linear_head=OnlineClassifier(
+            online_linear_head=OnlineLinearClassifier(
                 input_dim=backbone.output_dim, 
-                **linear_head_kwargs
+                **online_linear_head_kwargs
             )
         )
         
@@ -38,7 +38,7 @@ class SwAV(BaseModule):
         
         self.save_hyperparameters(projection_head_kwargs)
         self.save_hyperparameters(prototype_kwargs)
-        self.save_hyperparameters(linear_head_kwargs)
+        self.save_hyperparameters(online_linear_head_kwargs)
         
     def forward(self, x):
         z = self.backbone(x).flatten(start_dim=1)
@@ -47,7 +47,7 @@ class SwAV(BaseModule):
         p = self.prototypes(p)
         return z, p
 
-    def training_step(self, batch, batch_index):
+    def training_output(self, batch, batch_index):
         self.prototypes.normalize()
         views, y = batch
         outputs = [self.forward(view) for view in views]
@@ -55,12 +55,11 @@ class SwAV(BaseModule):
         high_resolution = prototypes[:2]
         low_resolution = prototypes[2:]
         loss = self.criterion(high_resolution, low_resolution)
-        loss_dict = {"train-ssl-loss": loss}
-        
-        cls_loss, cls_loss_dict = self.linear_head.training_step((features[0].detach(), y), batch_index)
-        loss_dict.update(cls_loss_dict)        
-        self.log_dict(loss_dict, sync_dist=self.is_distributed)        
-        return loss + cls_loss
+        return {
+            "loss": loss, 
+            "embedding": features[0].detach(),
+            "target": y
+        }
     
     def configure_optimizers(self):
         # Don't use weight decay for batch norm, bias parameters, and classification
@@ -78,7 +77,7 @@ class SwAV(BaseModule):
                 },
                 {
                     "name": "online_classifier",
-                    "params": self.linear_head.parameters(),
+                    "params": self.online_linear_head.parameters(),
                     "weight_decay": 0.0,
                 },
             ],

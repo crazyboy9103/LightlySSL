@@ -5,7 +5,7 @@ from lightly.utils.lars import LARS
 from lightly.utils.scheduler import CosineWarmupScheduler
 
 from .base import BaseModule
-from .eval import OnlineClassifier
+from .eval import OnlineLinearClassifier
 
 class BarlowTwins(BaseModule):
     def __init__(
@@ -13,7 +13,7 @@ class BarlowTwins(BaseModule):
         backbone, 
         batch_size_per_device,
         projection_head_kwargs = dict(hidden_dim=2048, output_dim=2048),
-        linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1, k=15),
+        online_linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1),
     ):
         super().__init__(
             backbone, 
@@ -22,34 +22,32 @@ class BarlowTwins(BaseModule):
                 input_dim=backbone.output_dim, 
                 **projection_head_kwargs
             ),
-            linear_head=OnlineClassifier(
+            online_linear_head=OnlineLinearClassifier(
                 input_dim=backbone.output_dim, 
-                **linear_head_kwargs
+                **online_linear_head_kwargs
             )
         )
         
         self.criterion = BarlowTwinsLoss(gather_distributed=self.is_distributed)
         
         self.save_hyperparameters(projection_head_kwargs)
-        self.save_hyperparameters(linear_head_kwargs)
+        self.save_hyperparameters(online_linear_head_kwargs)
         
     def forward(self, x):
         z = self.backbone(x).flatten(start_dim=1)
         p = self.projection_head(z)
         return z, p
 
-    def training_step(self, batch, batch_index):
+    def training_output(self, batch, batch_index):
         (x0, x1), y = batch
         z0, p0 = self.forward(x0)
         z1, p1 = self.forward(x1)
         loss = self.criterion(p0, p1)
-        
-        cls_loss, cls_loss_dict = self.linear_head.training_step((z0.detach(), y), batch_index)
-        
-        loss_dict = {"train-ssl-loss": loss}
-        loss_dict.update(cls_loss_dict)
-        self.log_dict(loss_dict, sync_dist=self.is_distributed)
-        return loss + cls_loss
+        return {
+            "loss": loss, 
+            "embedding": z0.detach(),
+            "target": y
+        }
     
     def configure_optimizers(self):
         lr_factor = self.batch_size_per_device * self.trainer.world_size / 256
@@ -73,7 +71,7 @@ class BarlowTwins(BaseModule):
                 },
                 {
                     "name": "online_classifier",
-                    "params": self.linear_head.parameters(),
+                    "params": self.online_linear_head.parameters(),
                     "weight_decay": 0.0,
                 },
             ],

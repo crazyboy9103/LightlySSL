@@ -1,4 +1,5 @@
 import copy 
+from typing import Union
 
 from lightly.loss import DINOLoss
 from lightly.models.modules import DINOProjectionHead
@@ -11,9 +12,10 @@ from lightly.utils.scheduler import cosine_schedule
 from lightly.utils.scheduler import CosineWarmupScheduler
 
 from torch.optim import SGD
+from torch.optim.optimizer import Optimizer
 
 from .base import BaseModule
-from .eval import OnlineClassifier
+from .eval import OnlineLinearClassifier
 
 class DINO(BaseModule):
     def __init__(
@@ -22,7 +24,7 @@ class DINO(BaseModule):
         batch_size_per_device,
         projection_head_kwargs = dict(hidden_dim=512, bottleneck_dim=64, output_dim=2048),
         loss_kwargs = dict(warmup_teacher_temp_epochs=5),
-        linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1, k=15),
+        online_linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1),
     ):
         super().__init__(
             backbone, 
@@ -31,14 +33,14 @@ class DINO(BaseModule):
                 input_dim=backbone.output_dim, 
                 **projection_head_kwargs
             ),
-            linear_head=OnlineClassifier(
+            online_linear_head=OnlineLinearClassifier(
                 input_dim=backbone.output_dim, 
-                **linear_head_kwargs
+                **online_linear_head_kwargs
             )
         )
         self.save_hyperparameters(projection_head_kwargs)
         self.save_hyperparameters(loss_kwargs)
-        self.save_hyperparameters(linear_head_kwargs)
+        self.save_hyperparameters(online_linear_head_kwargs)
         
         # teacher model dont freeze last layer
         projection_head_kwargs.pop("freeze_last_layer", None)
@@ -67,7 +69,7 @@ class DINO(BaseModule):
         z = self.teacher_projection_head(y)
         return y, z
 
-    def training_step(self, batch, batch_index):
+    def training_output(self, batch, batch_index):
         momentum = cosine_schedule(
             self.trainer.global_step, 
             self.trainer.estimated_stepping_batches, 
@@ -87,14 +89,11 @@ class DINO(BaseModule):
         _, student_projections = zip(*student_output)        
         
         loss = self.criterion(teacher_projections, student_projections, epoch=self.current_epoch)
-        
-        loss_dict = {"train-ssl-loss": loss}
-        
-        cls_loss, cls_loss_dict = self.linear_head.training_step((teacher_features[0].detach(), targets), batch_index)
-        loss_dict.update(cls_loss_dict)
-        
-        self.log_dict(loss_dict, sync_dist=self.is_distributed)           
-        return loss + cls_loss
+        return {
+            "loss": loss, 
+            "embedding": teacher_features[0].detach(),
+            "target": targets
+        }
 
     def on_after_backward(self):
         self.projection_head.cancel_last_layer_gradients(current_epoch=self.current_epoch)
@@ -117,7 +116,7 @@ class DINO(BaseModule):
                 },
                 {
                     "name": "online_classifier",
-                    "params": self.linear_head.parameters(),
+                    "params": self.online_linear_head.parameters(),
                     "weight_decay": 0.0,
                 },
             ],
@@ -138,3 +137,16 @@ class DINO(BaseModule):
             "interval": "step",
         }
         return [optimizer], [scheduler]
+    
+    def configure_gradient_clipping(
+        self,
+        optimizer: Optimizer,
+        gradient_clip_val: Union[int, float, None] = None,
+        gradient_clip_algorithm: Union[str, None] = None,
+    ) -> None:
+        self.clip_gradients(
+            optimizer=optimizer,
+            gradient_clip_val=gradient_clip_val or 3.0,
+            gradient_clip_algorithm=gradient_clip_algorithm or "norm",
+        )
+        self.projection_head.cancel_last_layer_gradients(self.current_epoch)
