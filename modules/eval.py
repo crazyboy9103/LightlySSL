@@ -1,11 +1,8 @@
-import torchmetrics
 import torch
 from torch import nn
 from torch.nn import functional as F
+import torchmetrics
 import pytorch_lightning as pl
-# from lightly.models.utils import deactivate_requires_grad
-
-# from .base import BaseModule
 
 class OnlineClassifier(pl.LightningModule):
     def __init__(
@@ -14,13 +11,11 @@ class OnlineClassifier(pl.LightningModule):
         num_classes: int = 1000,
         label_smoothing: float = 0.0,
         k: int = 15,
-        # eval_type: str = "linear",
     ) -> None:
         super().__init__()
         self.head = nn.Linear(input_dim, num_classes)
         self.label_smoothing = label_smoothing
         self.k = k
-        # self.eval_type = eval_type
         
         metric_kwargs = dict(
             task = "multiclass",
@@ -41,6 +36,8 @@ class OnlineClassifier(pl.LightningModule):
         return self._epoch_end("train")
         
     def on_validation_epoch_end(self):
+        # After validation, we would want to reset the parameters of the head (linear probe)
+        self.head.reset_parameters()
         return self._epoch_end("valid")
         
     def _epoch_end(self, phase):
@@ -51,8 +48,8 @@ class OnlineClassifier(pl.LightningModule):
     def accumulate_knn(self, z_hat, y):
         # at train time, we accumulate the embeddings and labels
         if self.training:
-            self.z_train.append(z_hat.detach().cpu())
-            self.y_train.append(y.detach().cpu())
+            self.z_train.append(z_hat.detach())
+            self.y_train.append(y.detach())
         
         # at validation time, we add knn predictions to the metrics 
         else:
@@ -73,8 +70,6 @@ class OnlineClassifier(pl.LightningModule):
         self.f1(y_hat, y)
         
     def forward(self, z_hat, y):
-        # if self.eval_type == "linear":
-        #     x = x.detach()
         z_hat = z_hat.detach().flatten(start_dim=1)
         y_hat = self.head(z_hat)
         loss = F.cross_entropy(y_hat, y, label_smoothing=self.label_smoothing if self.training else 0.0)
@@ -179,3 +174,12 @@ class OnlineClassifier(pl.LightningModule):
 #         _, loss_dict = self.linear.validation_step(zhat, batch[1], batch_index)
 #         self.log_dict(loss_dict, sync_dist=self.is_distributed)
     
+if __name__ == "__main__":
+    classifier = OnlineClassifier(
+        input_dim=2048,
+        num_classes=1000,
+        label_smoothing=0.0,
+        k=15,
+    )
+    for param in classifier.parameters():
+        print(param.shape, param.requires_grad)

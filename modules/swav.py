@@ -1,7 +1,9 @@
-import torch
 from torch.nn import functional as F
 from lightly.loss import SwaVLoss
 from lightly.models.modules import SwaVProjectionHead, SwaVPrototypes
+from lightly.models.utils import get_weight_decay_parameters
+from lightly.utils.lars import LARS
+from lightly.utils.scheduler import CosineWarmupScheduler
 
 from .base import BaseModule
 from .eval import OnlineClassifier
@@ -10,34 +12,25 @@ class SwAV(BaseModule):
     def __init__(
         self, 
         backbone, 
-        optimizer = torch.optim.SGD, 
-        optimizer_kwargs = dict(lr=6e-2), 
-        scheduler = None, 
-        scheduler_kwargs = None,
+        batch_size_per_device,
         projection_head_kwargs = dict(hidden_dim=512, output_dim=128),
         prototype_kwargs = dict(n_prototypes=512),
         linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1, k=15),
     ):
         super().__init__(
             backbone, 
-            optimizer, 
-            optimizer_kwargs, 
-            scheduler, 
-            scheduler_kwargs, 
+            batch_size_per_device,
             projection_head=SwaVProjectionHead(
                 input_dim=backbone.output_dim, 
-                hidden_dim=projection_head_kwargs["hidden_dim"], 
-                output_dim=projection_head_kwargs["output_dim"]
+                **projection_head_kwargs
             ),
             prototypes=SwaVPrototypes(
                 input_dim=projection_head_kwargs["output_dim"], 
-                n_prototypes=prototype_kwargs["n_prototypes"]
+                **prototype_kwargs
             ),
             linear_head=OnlineClassifier(
                 input_dim=backbone.output_dim, 
-                num_classes=linear_head_kwargs["num_classes"],
-                label_smoothing=linear_head_kwargs["label_smoothing"],
-                k=linear_head_kwargs["k"]
+                **linear_head_kwargs
             )
         )
         
@@ -45,6 +38,7 @@ class SwAV(BaseModule):
         
         self.save_hyperparameters(projection_head_kwargs)
         self.save_hyperparameters(prototype_kwargs)
+        self.save_hyperparameters(linear_head_kwargs)
         
     def forward(self, x):
         z = self.backbone(x).flatten(start_dim=1)
@@ -67,3 +61,47 @@ class SwAV(BaseModule):
         loss_dict.update(cls_loss_dict)        
         self.log_dict(loss_dict, sync_dist=self.is_distributed)        
         return loss + cls_loss
+    
+    def configure_optimizers(self):
+        # Don't use weight decay for batch norm, bias parameters, and classification
+        # head to improve performance.
+        params, params_no_weight_decay = get_weight_decay_parameters(
+            [self.backbone, self.projection_head, self.prototypes]
+        )
+        optimizer = LARS(
+            [
+                {"name": "swav", "params": params},
+                {
+                    "name": "swav_no_weight_decay",
+                    "params": params_no_weight_decay,
+                    "weight_decay": 0.0,
+                },
+                {
+                    "name": "online_classifier",
+                    "params": self.linear_head.parameters(),
+                    "weight_decay": 0.0,
+                },
+            ],
+            # Smaller learning rate for smaller batches: lr=0.6 for batch_size=256
+            # scaled linearly by batch size to lr=4.8 for batch_size=2048.
+            # See Appendix A.1. and A.6. in SwAV paper https://arxiv.org/pdf/2006.09882.pdf
+            lr=0.6 * (self.batch_size_per_device * self.trainer.world_size) / 256,
+            momentum=0.9,
+            weight_decay=1e-6,
+        )
+        scheduler = {
+            "scheduler": CosineWarmupScheduler(
+                optimizer=optimizer,
+                warmup_epochs=int(
+                    self.trainer.estimated_stepping_batches
+                    / self.trainer.max_epochs
+                    * 10
+                ),
+                max_epochs=int(self.trainer.estimated_stepping_batches),
+                end_value=0.0006
+                * (self.batch_size_per_device * self.trainer.world_size)
+                / 256,
+            ),
+            "interval": "step",
+        }
+        return [optimizer], [scheduler]

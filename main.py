@@ -9,11 +9,12 @@ from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 
 from dataset import dataset_builder
 from backbone import backbone_builder
-from configs.base import train_config, optimizer_config, eval_optimizer_config
+from config import config_builder
 
 from modules import BarlowTwins, BYOL, DINO, MoCo, SimCLR, SwAV, VICReg
 
 def trainer_builder(
+    devices,
     checkpoint_path, 
     logger, 
     metric_name,
@@ -34,7 +35,7 @@ def trainer_builder(
         ],
         fast_dev_run = False,
         sync_batchnorm=True,
-        devices=train_config["devices"],
+        devices=devices,
         log_every_n_steps=1,
         strategy="auto", # "ddp_find_unused_parameters_true",
         num_sanity_val_steps=0,
@@ -42,7 +43,9 @@ def trainer_builder(
     )
     return trainer
 
-def main():  
+def main(args):
+    train_config, model_config = config_builder(args)
+    
     pl.seed_everything(train_config["seed"])
     torch.set_float32_matmul_precision('medium')
     
@@ -55,7 +58,6 @@ def main():
         train_config["ssl"], 
         train_config["dataset"], 
         train_config["data_root"], 
-        train_config["seed"]
     )
 
     experiment_name = f'{train_config["ssl"]}_{train_config["backbone"]}_{train_config["dataset"]}'
@@ -71,17 +73,6 @@ def main():
     )
     
     def ssl_experiment():
-        config = optimizer_config
-        model_configs = {
-            "barlowtwins": barlowtwins.model_config,
-            "byol": byol.model_config,
-            "dino": dino.model_config,
-            "moco": moco.model_config,
-            "simclr": simclr.model_config,
-            "swav": swav.model_config,
-            "vicreg": vicreg.model_config,
-        }
-        
         models = {
             "barlowtwins": BarlowTwins,
             "byol": BYOL,
@@ -92,14 +83,13 @@ def main():
             "vicreg": VICReg,
         }
         
-        ssl = train_config["ssl"]
-        config.update(model_configs[ssl])
-        model = models[ssl](backbone, **config)
+        model = models[train_config["ssl"]](backbone, train_config["batch_size"], **model_config)
         
         ssl_trainer = trainer_builder(
+            train_config["devices"],
             f'./checkpoints/ssl/{train_config["ssl"]}/{train_config["backbone"]}/{train_config["dataset"]}', 
             logger,
-            "valid-ssl-loss",
+            "train-ssl-loss",
             "min",
             train_config["ssl_epochs"]
         )
@@ -114,7 +104,6 @@ def main():
             num_workers=train_config["num_workers"], 
             pin_memory=True,
             generator=torch.Generator().manual_seed(train_config["seed"]),
-            drop_last=True
         )
         
         valid_loader = DataLoader(
@@ -124,7 +113,6 @@ def main():
             num_workers=train_config["num_workers"], 
             pin_memory=True,
             generator=torch.Generator().manual_seed(train_config["seed"]),
-            drop_last=True
         )
         
         ssl_trainer.fit(
@@ -133,9 +121,21 @@ def main():
             val_dataloaders=valid_loader,
         )
         
-        
     if "train" in train_config["experiment"]:
         ssl_experiment()
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    from backbone import AVAILABLE_BACKBONES
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--backbone", type=str, default="resnet18", choices=AVAILABLE_BACKBONES)
+    parser.add_argument("--ssl", type=str, default="byol", choices=["barlowtwins", "byol", "dino", "moco", "simclr", "swav", "vicreg"])
+    parser.add_argument("--sl", type=str, default="linear", choices=["linear", "finetune"])
+    parser.add_argument("--dataset", type=str, default="cifar10")
+    parser.add_argument("--data_root", type=str, default="./data")
+    parser.add_argument("--num_gpus", type=int, default=4)
+    args = parser.parse_args()
+
+    main(args)

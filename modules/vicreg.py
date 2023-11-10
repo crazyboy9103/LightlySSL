@@ -1,7 +1,9 @@
-import torch
 from lightly.loss.vicreg_loss import VICRegLoss
 ## The projection head is the same as the Barlow Twins one
 from lightly.models.modules.heads import VICRegProjectionHead
+from lightly.models.utils import get_weight_decay_parameters
+from lightly.utils.lars import LARS
+from lightly.utils.scheduler import CosineWarmupScheduler
 
 from .base import BaseModule
 from .eval import OnlineClassifier
@@ -10,36 +12,27 @@ class VICReg(BaseModule):
     def __init__(
         self, 
         backbone, 
-        optimizer = torch.optim.SGD, 
-        optimizer_kwargs = dict(lr=6e-2), 
-        scheduler = None, 
-        scheduler_kwargs = None,
+        batch_size_per_device,
         projection_head_kwargs = dict(hidden_dim=1024, output_dim=256, num_layers=2),
         linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1, k=15),
     ):
         super().__init__(
             backbone, 
-            optimizer, 
-            optimizer_kwargs, 
-            scheduler, 
-            scheduler_kwargs, 
+            batch_size_per_device,
             projection_head=VICRegProjectionHead(
                 input_dim=backbone.output_dim, 
-                hidden_dim=projection_head_kwargs["hidden_dim"], 
-                output_dim=projection_head_kwargs["output_dim"],
-                num_layers=projection_head_kwargs["num_layers"]
+                **projection_head_kwargs
             ),
             linear_head=OnlineClassifier(
                 input_dim=backbone.output_dim, 
-                num_classes=linear_head_kwargs["num_classes"],
-                label_smoothing=linear_head_kwargs["label_smoothing"],
-                k=linear_head_kwargs["k"]
+                **linear_head_kwargs
             )
         )
         
         self.criterion = VICRegLoss(gather_distributed=self.is_distributed)
         
         self.save_hyperparameters(projection_head_kwargs)
+        self.save_hyperparameters(linear_head_kwargs)
         
     def forward(self, x):
         z = self.backbone(x).flatten(start_dim=1)
@@ -57,3 +50,61 @@ class VICReg(BaseModule):
         loss_dict.update(cls_loss_dict)
         self.log_dict(loss_dict, sync_dist=self.is_distributed)         
         return loss + cls_loss
+
+    def configure_optimizers(self):
+        # Don't use weight decay for batch norm, bias parameters, and classification
+        # head to improve performance.
+        params, params_no_weight_decay = get_weight_decay_parameters(
+            [self.backbone, self.projection_head]
+        )
+        global_batch_size = self.batch_size_per_device * self.trainer.world_size
+        base_lr = _get_base_learning_rate(global_batch_size=global_batch_size)
+        optimizer = LARS(
+            [
+                {"name": "vicreg", "params": params},
+                {
+                    "name": "vicreg_no_weight_decay",
+                    "params": params_no_weight_decay,
+                    "weight_decay": 0.0,
+                },
+                {
+                    "name": "online_classifier",
+                    "params": self.linear_head.parameters(),
+                    "weight_decay": 0.0,
+                },
+            ],
+            # Linear learning rate scaling with a base learning rate of 0.2.
+            # See https://arxiv.org/pdf/2105.04906.pdf for details.
+            lr=base_lr * global_batch_size / 256,
+            momentum=0.9,
+            weight_decay=1e-6,
+        )
+        scheduler = {
+            "scheduler": CosineWarmupScheduler(
+                optimizer=optimizer,
+                warmup_epochs=(
+                    self.trainer.estimated_stepping_batches
+                    / self.trainer.max_epochs
+                    * 10
+                ),
+                max_epochs=self.trainer.estimated_stepping_batches,
+                end_value=0.01,  # Scale base learning rate from 0.2 to 0.002.
+            ),
+            "interval": "step",
+        }
+        return [optimizer], [scheduler]
+    
+def _get_base_learning_rate(global_batch_size: int) -> float:
+    """Returns the base learning rate for training 100 epochs with a given batch size.
+
+    This follows section C.4 in https://arxiv.org/pdf/2105.04906.pdf.
+
+    """
+    if global_batch_size == 128:
+        return 0.8
+    elif global_batch_size == 256:
+        return 0.5
+    elif global_batch_size == 512:
+        return 0.4
+    else:
+        return 0.3

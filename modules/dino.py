@@ -1,10 +1,16 @@
 import copy 
 
-import torch
 from lightly.loss import DINOLoss
 from lightly.models.modules import DINOProjectionHead
-from lightly.models.utils import deactivate_requires_grad, update_momentum
+from lightly.models.utils import (
+    deactivate_requires_grad, 
+    update_momentum, 
+    get_weight_decay_parameters
+)
 from lightly.utils.scheduler import cosine_schedule
+from lightly.utils.scheduler import CosineWarmupScheduler
+
+from torch.optim import SGD
 
 from .base import BaseModule
 from .eval import OnlineClassifier
@@ -13,46 +19,33 @@ class DINO(BaseModule):
     def __init__(
         self, 
         backbone, 
-        optimizer = torch.optim.SGD, 
-        optimizer_kwargs = dict(lr=6e-2), 
-        scheduler = None, 
-        scheduler_kwargs = None,
+        batch_size_per_device,
         projection_head_kwargs = dict(hidden_dim=512, bottleneck_dim=64, output_dim=2048),
         loss_kwargs = dict(warmup_teacher_temp_epochs=5),
         linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1, k=15),
     ):
         super().__init__(
             backbone, 
-            optimizer, 
-            optimizer_kwargs, 
-            scheduler, 
-            scheduler_kwargs, 
+            batch_size_per_device,
             projection_head=DINOProjectionHead(
                 input_dim=backbone.output_dim, 
-                hidden_dim=projection_head_kwargs["hidden_dim"], 
-                bottleneck_dim=projection_head_kwargs["bottleneck_dim"],
-                output_dim=projection_head_kwargs["output_dim"],
-                batch_norm=projection_head_kwargs["batch_norm"],
-                freeze_last_layer=projection_head_kwargs["freeze_last_layer"],
-                norm_last_layer=projection_head_kwargs["norm_last_layer"]
+                **projection_head_kwargs
             ),
             linear_head=OnlineClassifier(
                 input_dim=backbone.output_dim, 
-                num_classes=linear_head_kwargs["num_classes"],
-                label_smoothing=linear_head_kwargs["label_smoothing"],
-                k=linear_head_kwargs["k"]
+                **linear_head_kwargs
             )
         )
+        self.save_hyperparameters(projection_head_kwargs)
+        self.save_hyperparameters(loss_kwargs)
+        self.save_hyperparameters(linear_head_kwargs)
         
+        # teacher model dont freeze last layer
+        projection_head_kwargs.pop("freeze_last_layer", None)
         self.teacher_backbone = copy.deepcopy(backbone)
         self.teacher_projection_head = DINOProjectionHead(
             input_dim=backbone.output_dim, 
-            hidden_dim=projection_head_kwargs["hidden_dim"], 
-            bottleneck_dim=projection_head_kwargs["bottleneck_dim"],
-            output_dim=projection_head_kwargs["output_dim"],
-            batch_norm=projection_head_kwargs["batch_norm"],
-            freeze_last_layer=projection_head_kwargs["freeze_last_layer"],
-            norm_last_layer=projection_head_kwargs["norm_last_layer"]
+            **projection_head_kwargs
         )
         
         deactivate_requires_grad(self.teacher_backbone)
@@ -60,15 +53,9 @@ class DINO(BaseModule):
 
         self.criterion = DINOLoss(
             output_dim=projection_head_kwargs["output_dim"],
-            warmup_teacher_temp=loss_kwargs["warmup_teacher_temp"],
-            teacher_temp=loss_kwargs["teacher_temp"],
-            warmup_teacher_temp_epochs=loss_kwargs["warmup_teacher_temp_epochs"],
-            student_temp=loss_kwargs["student_temp"],
-            center_momentum=loss_kwargs["center_momentum"]
+            **loss_kwargs
         )
         
-        self.save_hyperparameters(projection_head_kwargs)
-        self.save_hyperparameters(loss_kwargs)
         
     def forward(self, x):
         y = self.backbone(x).flatten(start_dim=1)
@@ -111,3 +98,43 @@ class DINO(BaseModule):
 
     def on_after_backward(self):
         self.projection_head.cancel_last_layer_gradients(current_epoch=self.current_epoch)
+        
+    def configure_optimizers(self):
+        # Don't use weight decay for batch norm, bias parameters, and classification
+        # head to improve performance.
+        params, params_no_weight_decay = get_weight_decay_parameters(
+            [self.backbone, self.projection_head]
+        )
+        # For ResNet50 we use SGD instead of AdamW/LARS as recommended by the authors:
+        # https://github.com/facebookresearch/dino#resnet-50-and-other-convnets-trainings
+        optimizer = SGD(
+            [
+                {"name": "dino", "params": params},
+                {
+                    "name": "dino_no_weight_decay",
+                    "params": params_no_weight_decay,
+                    "weight_decay": 0.0,
+                },
+                {
+                    "name": "online_classifier",
+                    "params": self.linear_head.parameters(),
+                    "weight_decay": 0.0,
+                },
+            ],
+            lr=0.03 * self.batch_size_per_device * self.trainer.world_size / 256,
+            momentum=0.9,
+            weight_decay=1e-4,
+        )
+        scheduler = {
+            "scheduler": CosineWarmupScheduler(
+                optimizer=optimizer,
+                warmup_epochs=int(
+                    self.trainer.estimated_stepping_batches
+                    / self.trainer.max_epochs
+                    * 10
+                ),
+                max_epochs=int(self.trainer.estimated_stepping_batches),
+            ),
+            "interval": "step",
+        }
+        return [optimizer], [scheduler]

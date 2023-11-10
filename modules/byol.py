@@ -1,10 +1,15 @@
 import copy 
 
-import torch
 from lightly.loss import NegativeCosineSimilarity
-from lightly.models.utils import deactivate_requires_grad, update_momentum
 from lightly.models.modules import BYOLPredictionHead, BYOLProjectionHead
+from lightly.models.utils import (
+    deactivate_requires_grad, 
+    update_momentum,
+    get_weight_decay_parameters
+)
+from lightly.utils.lars import LARS
 from lightly.utils.scheduler import cosine_schedule
+from lightly.utils.scheduler import CosineWarmupScheduler
 
 from .base import BaseModule
 from .eval import OnlineClassifier
@@ -13,40 +18,33 @@ class BYOL(BaseModule):
     def __init__(
         self, 
         backbone, 
-        optimizer = torch.optim.SGD, 
-        optimizer_kwargs = dict(lr=6e-2), 
-        scheduler = None, 
-        scheduler_kwargs = None,
+        batch_size_per_device,
         projection_head_kwargs = dict(hidden_dim=1024, output_dim=256),
         prediction_head_kwargs = dict(hidden_dim=1024, output_dim=256),
         linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1, k=15),
     ):
         super().__init__(
             backbone, 
-            optimizer, 
-            optimizer_kwargs, 
-            scheduler, 
-            scheduler_kwargs, 
+            batch_size_per_device,
             projection_head=BYOLProjectionHead(
                 input_dim=backbone.output_dim, 
-                hidden_dim=projection_head_kwargs["hidden_dim"], 
-                output_dim=projection_head_kwargs["output_dim"]
+                **projection_head_kwargs
             ),
             prediction_head=BYOLPredictionHead(
                 input_dim=projection_head_kwargs["output_dim"],  
-                hidden_dim=prediction_head_kwargs["hidden_dim"],
-                output_dim=prediction_head_kwargs["output_dim"]
+                **prediction_head_kwargs
             ),
             linear_head=OnlineClassifier(
                 input_dim=backbone.output_dim, 
-                num_classes=linear_head_kwargs["num_classes"],
-                label_smoothing=linear_head_kwargs["label_smoothing"],
-                k=linear_head_kwargs["k"]
+                **linear_head_kwargs
             )
         )
         
         self.backbone_momentum = copy.deepcopy(backbone)
-        self.projection_head_momentum = copy.deepcopy(self.projection_head)
+        self.projection_head_momentum = BYOLProjectionHead(
+            input_dim=backbone.output_dim, 
+            **projection_head_kwargs
+        )
         
         deactivate_requires_grad(self.backbone_momentum)
         deactivate_requires_grad(self.projection_head_momentum)
@@ -55,6 +53,7 @@ class BYOL(BaseModule):
         
         self.save_hyperparameters(projection_head_kwargs)
         self.save_hyperparameters(prediction_head_kwargs)
+        self.save_hyperparameters(linear_head_kwargs)
         
     def forward(self, x):
         z = self.backbone(x).flatten(start_dim=1)
@@ -69,8 +68,12 @@ class BYOL(BaseModule):
         return y
     
     def training_step(self, batch, batch_index):
-        # momentum = cosine_schedule(self.current_epoch, 10, 0.996, 1)
-        momentum = 0.996
+        momentum = cosine_schedule(
+            self.trainer.global_step, 
+            self.trainer.estimated_stepping_batches, 
+            start_value=0.99, 
+            end_value=1
+        )
         update_momentum(self.backbone, self.backbone_momentum, m=momentum)
         update_momentum(self.projection_head, self.projection_head_momentum, m=momentum)
         (x0, x1), y = batch
@@ -78,7 +81,7 @@ class BYOL(BaseModule):
         y0 = self.forward_momentum(x0)
         _, p1 = self.forward(x1)
         y1 = self.forward_momentum(x1)
-        loss = 0.5 * (self.criterion(p0, y1) + self.criterion(p1, y0))
+        loss = 2 * (self.criterion(p0, y1) + self.criterion(p1, y0))
         
         cls_loss, cls_loss_dict = self.linear_head.training_step((z0.detach(), y), batch_index)
         loss_dict = {"train-ssl-loss": loss}
@@ -86,3 +89,50 @@ class BYOL(BaseModule):
         self.log_dict(loss_dict, sync_dist=self.is_distributed)
         return loss + cls_loss
 
+    def configure_optimizers(self):
+        # Don't use weight decay for batch norm, bias parameters, and classification
+        # head to improve performance.
+        params, params_no_weight_decay = get_weight_decay_parameters(
+            [
+                self.backbone,
+                self.projection_head,
+                self.prediction_head,
+            ]
+        )
+        optimizer = LARS(
+            [
+                {
+                    "name": "byol_weight_decay", 
+                    "params": params
+                },
+                {
+                    "name": "byol_no_weight_decay",
+                    "params": params_no_weight_decay,
+                    "weight_decay": 0.0,
+                },
+                {
+                    "name": "online_classifier",
+                    "params": self.linear_head.parameters(),
+                    "weight_decay": 0.0,
+                },
+            ],
+            # Settings follow original code for 100 epochs which are slightly different
+            # from the paper, see:
+            # https://github.com/deepmind/deepmind-research/blob/f5de0ede8430809180254ee957abf36ed62579ef/byol/configs/byol.py#L21-L23
+            lr=0.45 * self.batch_size_per_device * self.trainer.world_size / 256,
+            momentum=0.9,
+            weight_decay=1e-6,
+        )
+        scheduler = {
+            "scheduler": CosineWarmupScheduler(
+                optimizer=optimizer,
+                warmup_epochs=int(
+                    self.trainer.estimated_stepping_batches
+                    / self.trainer.max_epochs
+                    * 10
+                ),
+                max_epochs=int(self.trainer.estimated_stepping_batches),
+            ),
+            "interval": "step",
+        }
+        return [optimizer], [scheduler]

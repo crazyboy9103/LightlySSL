@@ -1,6 +1,8 @@
-import torch
 from lightly.loss import NTXentLoss
 from lightly.models.modules import SimCLRProjectionHead
+from lightly.models.utils import get_weight_decay_parameters
+from lightly.utils.lars import LARS
+from lightly.utils.scheduler import CosineWarmupScheduler
 
 from .base import BaseModule
 from .eval import OnlineClassifier
@@ -9,34 +11,26 @@ class SimCLR(BaseModule):
     def __init__(
         self, 
         backbone, 
-        optimizer = torch.optim.SGD, 
-        optimizer_kwargs = dict(lr=6e-2), 
-        scheduler = None, 
-        scheduler_kwargs = None,
+        batch_size_per_device,
         projection_head_kwargs = dict(hidden_dim=2048, output_dim=2048),
         linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1, k=15),
     ):
         super().__init__(
             backbone, 
-            optimizer, 
-            optimizer_kwargs, 
-            scheduler, 
-            scheduler_kwargs, 
+            batch_size_per_device,
             projection_head=SimCLRProjectionHead(
                 input_dim=backbone.output_dim, 
-                hidden_dim=projection_head_kwargs["hidden_dim"], 
-                output_dim=projection_head_kwargs["output_dim"]
+                **projection_head_kwargs
             ),
             linear_head=OnlineClassifier(
                 input_dim=backbone.output_dim, 
-                num_classes=linear_head_kwargs["num_classes"],
-                label_smoothing=linear_head_kwargs["label_smoothing"],
-                k=linear_head_kwargs["k"]
+                **linear_head_kwargs
             )
         )
         self.criterion = NTXentLoss(gather_distributed=self.is_distributed)
         
         self.save_hyperparameters(projection_head_kwargs)
+        self.save_hyperparameters(linear_head_kwargs)
         
     def forward(self, x):
         z = self.backbone(x).flatten(start_dim=1)
@@ -54,3 +48,48 @@ class SimCLR(BaseModule):
         loss_dict.update(cls_loss_dict)
         self.log_dict(loss_dict, sync_dist=self.is_distributed)
         return loss + cls_loss
+    
+    def configure_optimizers(self):
+        # Don't use weight decay for batch norm, bias parameters, and classification
+        # head to improve performance.
+        params, params_no_weight_decay = get_weight_decay_parameters(
+            [self.backbone, self.projection_head]
+        )
+        optimizer = LARS(
+            [
+                {"name": "simclr", "params": params},
+                {
+                    "name": "simclr_no_weight_decay",
+                    "params": params_no_weight_decay,
+                    "weight_decay": 0.0,
+                },
+                {
+                    "name": "online_classifier",
+                    "params": self.linear_head.parameters(),
+                    "weight_decay": 0.0,
+                },
+            ],
+            # Square root learning rate scaling improves performance for small
+            # batch sizes (<=2048) and few training epochs (<=200). Alternatively,
+            # linear scaling can be used for larger batches and longer training:
+            #   lr=0.3 * self.batch_size_per_device * self.trainer.world_size / 256
+            # See Appendix B.1. in the SimCLR paper https://arxiv.org/abs/2002.05709
+            lr=0.075 * (self.batch_size_per_device * self.trainer.world_size) ** 0.5,
+            momentum=0.9,
+            # Note: Paper uses weight decay of 1e-6 but reference code 1e-4. See:
+            # https://github.com/google-research/simclr/blob/2fc637bdd6a723130db91b377ac15151e01e4fc2/README.md?plain=1#L103
+            weight_decay=1e-6,
+        )
+        scheduler = {
+            "scheduler": CosineWarmupScheduler(
+                optimizer=optimizer,
+                warmup_epochs=int(
+                    self.trainer.estimated_stepping_batches
+                    / self.trainer.max_epochs
+                    * 10
+                ),
+                max_epochs=int(self.trainer.estimated_stepping_batches),
+            ),
+            "interval": "step",
+        }
+        return [optimizer], [scheduler]

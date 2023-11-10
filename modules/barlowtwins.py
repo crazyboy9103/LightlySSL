@@ -1,7 +1,8 @@
-import torch
-
 from lightly.loss import BarlowTwinsLoss
 from lightly.models.modules import BarlowTwinsProjectionHead
+from lightly.models.utils import get_weight_decay_parameters
+from lightly.utils.lars import LARS
+from lightly.utils.scheduler import CosineWarmupScheduler
 
 from .base import BaseModule
 from .eval import OnlineClassifier
@@ -10,39 +11,31 @@ class BarlowTwins(BaseModule):
     def __init__(
         self, 
         backbone, 
-        optimizer = torch.optim.SGD, 
-        optimizer_kwargs = dict(lr=6e-2), 
-        scheduler = None, 
-        scheduler_kwargs = None,
+        batch_size_per_device,
         projection_head_kwargs = dict(hidden_dim=2048, output_dim=2048),
         linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1, k=15),
     ):
         super().__init__(
             backbone, 
-            optimizer, 
-            optimizer_kwargs, 
-            scheduler, 
-            scheduler_kwargs, 
+            batch_size_per_device,
             projection_head=BarlowTwinsProjectionHead(
                 input_dim=backbone.output_dim, 
-                hidden_dim=projection_head_kwargs["hidden_dim"],
-                output_dim=projection_head_kwargs["output_dim"]
+                **projection_head_kwargs
             ),
             linear_head=OnlineClassifier(
                 input_dim=backbone.output_dim, 
-                num_classes=linear_head_kwargs["num_classes"],
-                label_smoothing=linear_head_kwargs["label_smoothing"],
-                k=linear_head_kwargs["k"]
+                **linear_head_kwargs
             )
         )
         
         self.criterion = BarlowTwinsLoss(gather_distributed=self.is_distributed)
         
         self.save_hyperparameters(projection_head_kwargs)
+        self.save_hyperparameters(linear_head_kwargs)
         
     def forward(self, x):
         z = self.backbone(x).flatten(start_dim=1)
-        p = self.projection_head(x)
+        p = self.projection_head(z)
         return z, p
 
     def training_step(self, batch, batch_index):
@@ -58,8 +51,47 @@ class BarlowTwins(BaseModule):
         self.log_dict(loss_dict, sync_dist=self.is_distributed)
         return loss + cls_loss
     
+    def configure_optimizers(self):
+        lr_factor = self.batch_size_per_device * self.trainer.world_size / 256
 
-if __name__ == "__main__":
-    from backbone import backbone_builder
-    backbone = backbone_builder("resnet18")
-    model = BarlowTwins(backbone)
+        # Don't use weight decay for batch norm, bias parameters, and classification
+        # head to improve performance.
+        params, params_no_weight_decay = get_weight_decay_parameters(
+            [self.backbone, self.projection_head]
+        )
+        optimizer = LARS(
+            [
+                {
+                    "name": "barlowtwins_weight_decay", 
+                    "params": params
+                },
+                {
+                    "name": "barlowtwins_no_weight_decay",
+                    "params": params_no_weight_decay,
+                    "weight_decay": 0.0,
+                    "lr": 0.0048 * lr_factor,
+                },
+                {
+                    "name": "online_classifier",
+                    "params": self.linear_head.parameters(),
+                    "weight_decay": 0.0,
+                },
+            ],
+            lr=0.2 * lr_factor,
+            momentum=0.9,
+            weight_decay=1.5e-6,
+        )
+
+        scheduler = {
+            "scheduler": CosineWarmupScheduler(
+                optimizer=optimizer,
+                warmup_epochs=int(
+                    self.trainer.estimated_stepping_batches
+                    / self.trainer.max_epochs
+                    * 10
+                ),
+                max_epochs=int(self.trainer.estimated_stepping_batches),
+            ),
+            "interval": "step",
+        }
+        return [optimizer], [scheduler]

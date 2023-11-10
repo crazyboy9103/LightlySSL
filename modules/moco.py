@@ -4,10 +4,14 @@ from lightly.loss import NTXentLoss
 from lightly.models.utils import (
     deactivate_requires_grad,
     update_momentum,
+    get_weight_decay_parameters
 )
 from lightly.models.modules import MoCoProjectionHead
+from lightly.utils.scheduler import CosineWarmupScheduler
 from lightly.utils.scheduler import cosine_schedule
+
 import torch 
+from torch.optim import SGD
 
 from .base import BaseModule
 from .eval import OnlineClassifier
@@ -17,30 +21,21 @@ class MoCo(BaseModule):
     def __init__(
         self, 
         backbone, 
-        optimizer = torch.optim.SGD, 
-        optimizer_kwargs = dict(lr=6e-2, momentum=0.9, weight_decay=5e-4), 
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR, 
-        scheduler_kwargs = dict(max_epochs=200),
+        batch_size_per_device,
         projection_head_kwargs = dict(hidden_dim=512, output_dim=128),
         loss_kwargs = dict(memory_bank_size=4096),
         linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1, k=15),
     ):
         super().__init__(
             backbone, 
-            optimizer, 
-            optimizer_kwargs, 
-            scheduler, 
-            scheduler_kwargs, 
+            batch_size_per_device,
             projection_head=MoCoProjectionHead(
                 input_dim=backbone.output_dim, 
-                hidden_dim=projection_head_kwargs["hidden_dim"], 
-                output_dim=projection_head_kwargs["output_dim"]
+                **projection_head_kwargs
             ),
             linear_head=OnlineClassifier(
                 input_dim=backbone.output_dim, 
-                num_classes=linear_head_kwargs["num_classes"],
-                label_smoothing=linear_head_kwargs["label_smoothing"],
-                k=linear_head_kwargs["k"]
+                **linear_head_kwargs
             )
         )
         
@@ -51,14 +46,14 @@ class MoCo(BaseModule):
 
         # create our loss with the optional memory bank
         self.criterion = NTXentLoss(
-            temperature=loss_kwargs["temperature"],
-            memory_bank_size=loss_kwargs["memory_bank_size"],
-            gather_distributed=self.is_distributed
+            gather_distributed=self.is_distributed,
+            **loss_kwargs
         )
         
         self.save_hyperparameters(projection_head_kwargs)
         self.save_hyperparameters(loss_kwargs)
-
+        self.save_hyperparameters(linear_head_kwargs)
+        
     def forward(self, x):
         z = self.backbone(x).flatten(start_dim=1)
         query = self.projection_head(z)
@@ -105,3 +100,44 @@ class MoCo(BaseModule):
         """Returns the unshuffled batch."""
         unshuffle = torch.argsort(shuffle)
         return batch[unshuffle]
+    
+    def configure_optimizers(self):
+        # Don't use weight decay for batch norm, bias parameters, and classification
+        # head to improve performance.
+        params, params_no_weight_decay = get_weight_decay_parameters(
+            [self.backbone, self.projection_head]
+        )
+        # For ResNet50 we use SGD instead of AdamW/LARS as recommended by the authors:
+        # https://github.com/facebookresearch/dino#resnet-50-and-other-convnets-trainings
+        optimizer = SGD(
+            [
+                {"name": "dino", "params": params},
+                {
+                    "name": "dino_no_weight_decay",
+                    "params": params_no_weight_decay,
+                    "weight_decay": 0.0,
+                },
+                {
+                    "name": "online_classifier",
+                    "params": self.linear_head.parameters(),
+                    "weight_decay": 0.0,
+                },
+            ],
+            lr=0.03 * self.batch_size_per_device * self.trainer.world_size / 256,
+            momentum=0.9,
+            weight_decay=1e-4,
+        )
+        scheduler = {
+            "scheduler": CosineWarmupScheduler(
+                optimizer=optimizer,
+                warmup_epochs=int(
+                    self.trainer.estimated_stepping_batches
+                    / self.trainer.max_epochs
+                    * 10
+                ),
+                max_epochs=int(self.trainer.estimated_stepping_batches),
+            ),
+            "interval": "step",
+        }
+        return [optimizer], [scheduler]
+    
