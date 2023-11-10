@@ -14,7 +14,7 @@ class BaseModule(pl.LightningModule):
         prototypes: Optional[nn.Module] = None,
         online_linear_head: Optional[nn.Module] = None,
     ):
-        super(BaseModule, self).__init__()
+        super().__init__()
 
         self.backbone = backbone
         self.batch_size_per_device = batch_size_per_device
@@ -34,7 +34,7 @@ class BaseModule(pl.LightningModule):
         embedding = output["embedding"]
         target = output["target"]
         
-        cls_loss, cls_loss_dict = self.online_linear_head.training_step((embedding, target), batch_index)
+        cls_loss, cls_loss_dict = self.online_linear_head.training_step((embedding.detach(), target), batch_index)
         self.log_dict({
             "train/ssl-loss": ssl_loss,
             **cls_loss_dict
@@ -51,7 +51,7 @@ class BaseModule(pl.LightningModule):
         metrics = self.online_linear_head.on_validation_epoch_end()
         self.log_dict(metrics, sync_dist=self.is_distributed)
     
-    def on_train_epoch_end(self):
-        metrics = self.online_linear_head.on_train_epoch_end()
+    def on_validation_epoch_start(self):
+        metrics = self.online_linear_head.on_validation_epoch_start()
         self.log_dict(metrics, sync_dist=self.is_distributed)
         

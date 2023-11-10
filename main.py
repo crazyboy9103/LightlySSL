@@ -6,12 +6,14 @@ import pytorch_lightning as pl
 from pytorch_lightning.strategies import ParallelStrategy
 from pytorch_lightning.callbacks import ModelCheckpoint, ModelSummary, EarlyStopping
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
+from pytorch_lightning.accelerators import find_usable_cuda_devices
 
 from dataset import dataset_builder, DataModule
 from backbone import backbone_builder
 from config import config_builder
 
 from modules import BarlowTwins, BYOL, DINO, MoCo, SimCLR, SwAV, VICReg
+from modules import EvalModule
 
 def trainer_builder(
     devices,
@@ -26,12 +28,12 @@ def trainer_builder(
     trainer = pl.Trainer(
         logger=logger, 
         max_epochs=epochs,
-        precision="16-mixed",
+        precision="32",
         benchmark=True,
         callbacks=[
             ModelCheckpoint(dirpath=checkpoint_path, save_top_k=2, monitor=metric_name, mode=metric_mode),
             ModelSummary(max_depth=-1),
-            EarlyStopping(monitor=metric_name, patience=10, mode=metric_mode, verbose=True)
+            # EarlyStopping(monitor=metric_name, patience=10, mode=metric_mode, verbose=True)
         ],
         fast_dev_run = False,
         sync_batchnorm=True,
@@ -44,35 +46,35 @@ def trainer_builder(
     return trainer
 
 def main(args):
-    train_config, model_config = config_builder(args)
-    
-    pl.seed_everything(train_config["seed"])
+    model_config = config_builder(args)
+    devices = find_usable_cuda_devices(args.num_gpus)
+    pl.seed_everything(args.seed)
     torch.set_float32_matmul_precision('medium')
     
     backbone = backbone_builder(
-        train_config["backbone"], 
-        train_config["backbone_checkpoint"]
+        args.backbone, 
+        args.backbone_checkpoint
     )
     
     train_data, test_data, train_transform, test_transform = dataset_builder(
-        train_config["ssl"], 
-        train_config["dataset"], 
-        train_config["data_root"], 
+        args.ssl, 
+        args.dataset, 
+        args.data_root, 
     )
 
-    experiment_name = f'{train_config["ssl"]}_{train_config["backbone"]}_{train_config["dataset"]}'
+    experiment_name = f'{args.ssl}_{args.backbone}_{args.dataset}'
     logger = WandbLogger(
         project="ssl-lightly",
         name=experiment_name,
         log_model=False,
         save_dir="."
-    ) if train_config["wandb"] else TensorBoardLogger(
+    ) if args.wandb else TensorBoardLogger(
         save_dir="./tb_logs",
         name=experiment_name,
         default_hp_metric=False
     )
     
-    def ssl_experiment():
+    def pretrain():
         models = {
             "barlowtwins": BarlowTwins,
             "byol": BYOL,
@@ -83,35 +85,69 @@ def main(args):
             "vicreg": VICReg,
         }
         
-        model = models[train_config["ssl"]](backbone, train_config["batch_size"], **model_config)
+        model = models[args.ssl](backbone, args.batch_size, **model_config)
         
-        ssl_trainer = trainer_builder(
-            train_config["devices"],
-            f'./checkpoints/ssl/{train_config["ssl"]}/{train_config["backbone"]}/{train_config["dataset"]}', 
+        pretrainer = trainer_builder(
+            devices,
+            f'./checkpoints/ssl/{args.ssl}/{args.backbone}/{args.dataset}', 
             logger,
             "train/ssl-loss", # "train/ssl-loss", "train/online-linear-loss", "valid/online-linear-loss", "train/online-linear-accuracy", "valid/online-linear-accuracy"
             "min",
-            train_config["ssl_epochs"]
+            args.eval_epochs
         )
     
         train_data.transform = train_transform
         test_data.transform = test_transform
 
         data_loader_kwargs = dict(
-            batch_size=train_config["batch_size"],
-            num_workers=train_config["num_workers"],
-            generator=torch.Generator().manual_seed(train_config["seed"]),
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            generator=torch.Generator().manual_seed(args.seed),
         )
         
         datamodule = DataModule(train_data, test_data, data_loader_kwargs)
         
-        ssl_trainer.fit(
+        pretrainer.fit(
             model, 
             datamodule=datamodule
         )
         
-    if "train" in train_config["experiment"]:
-        ssl_experiment()
+    def evaluate():
+        evaluator = trainer_builder(
+            devices,
+            f'./checkpoints/sl/{args.sl}/{args.backbone}/{args.dataset}', 
+            logger,
+            "valid/linear-loss", # "train/linear-loss", "valid/linear-loss", "train/linear-accuracy", "valid/linear-accuracy"
+            "min",
+            args.pretrain_epochs
+        )
+    
+        train_data.transform = test_transform
+        test_data.transform = test_transform
+
+        data_loader_kwargs = dict(
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            generator=torch.Generator().manual_seed(args.seed),
+        )
+        
+        datamodule = DataModule(train_data, test_data, data_loader_kwargs)
+        
+        model = EvalModule(
+            backbone, 
+            args.batch_size,
+            model_config["online_linear_head_kwargs"]["num_classes"],
+        )
+        evaluator.fit(
+            model, 
+            datamodule=datamodule
+        )
+        
+    if "train" in args.experiment:
+        pretrain()
+    
+    if "eval" in args.experiement:
+        evaluate()
 
 if __name__ == "__main__":
     import argparse
@@ -119,17 +155,31 @@ if __name__ == "__main__":
     from backbone import AVAILABLE_BACKBONES
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backbone", type=str, default="resnet50", choices=AVAILABLE_BACKBONES)
-    parser.add_argument("--ssl", type=str, default="byol", choices=["barlowtwins", "byol", "dino", "moco", "simclr", "swav", "vicreg"])
-    parser.add_argument("--sl", type=str, default="linear", choices=["linear", "finetune"])
+    # data args
     parser.add_argument("--dataset", type=str, default="cifar10")
     parser.add_argument("--data_root", type=str, default="./data")
+    
+    # model args
+    parser.add_argument("--backbone", type=str, default="resnet50", choices=AVAILABLE_BACKBONES)
+    parser.add_argument("--backbone_checkpoint", type=str, default="")
+    # training args
     parser.add_argument("--num_gpus", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--num_workers", type=int, default=8)
-    parser.add_argument("--ssl_epochs", type=int, default=400)
+    parser.add_argument("--experiment", type=str, default="train+eval")
+    # pretrain args
+    parser.add_argument("--pretrain_epochs", type=int, default=400)
+    parser.add_argument("--ssl", type=str, default="byol", choices=["barlowtwins", "byol", "dino", "moco", "simclr", "swav", "vicreg"])
+    # eval args
+    parser.add_argument("--eval_epochs", type=int, default=100)
+    parser.add_argument("--sl", type=str, default="linear", choices=["linear", "finetune"])
     parser.add_argument("--k", type=int, default=20, help="Number of neighbors for kNN")
     parser.add_argument("--label_smoothing", type=float, default=0.0)
+    
+    # misc
+    parser.add_argument("--seed", type=int, default=2023)
+    parser.add_argument("--wandb", action="store_true", default=True)
+
     args = parser.parse_args()
 
     main(args)

@@ -1,23 +1,7 @@
 from pytorch_lightning.accelerators import find_usable_cuda_devices
 
 def config_builder(args):
-    train_config = dict(
-        backbone = args.backbone,
-        backbone_checkpoint = "",
-        num_workers = args.num_workers,
-        batch_size = args.batch_size,
-        ssl_epochs = args.ssl_epochs,
-        seed = 2023,
-        dataset = args.dataset, # "cifar10", "cifar100", "stl10", "imagenet",
-        data_root = args.data_root, # "/media/research/C658FE8F58FE7E0D/datasets/imagenet",
-        sl = args.sl, # "linear", "finetune"
-        ssl = args.ssl, # "barlowtwins", "byol", "dino", "moco", "simclr", "swav", "vicreg"
-        wandb = True,
-        experiment = "train+eval", # "train", "eval", "train+eval"
-        devices = find_usable_cuda_devices(args.num_gpus)
-    )
-    
-    match train_config["dataset"]:
+    match args.dataset:
         case "cifar10":
             num_classes = 10
         
@@ -31,7 +15,7 @@ def config_builder(args):
             num_classes = 1000
         
         case _:
-            raise NotImplementedError(f"Dataset {train_config['dataset']} not implemented.")
+            raise NotImplementedError(f"Dataset {args.dataset} not implemented.")
         
     
     model_config = dict(
@@ -41,9 +25,9 @@ def config_builder(args):
         )
     )
     
-    match train_config["ssl"]:
+    match args.ssl:
         case "barlowtwins":
-            if train_config["dataset"] == "imagenet":
+            if args.dataset == "imagenet":
                 model_config["projection_head_kwargs"] = dict(
                     hidden_dim = 8192,
                     output_dim = 8192,
@@ -56,7 +40,7 @@ def config_builder(args):
                 )
                 
         case "byol":
-            if train_config["dataset"] == "imagenet":
+            if args.dataset == "imagenet":
                 model_config["projection_head_kwargs"] = dict(
                     hidden_dim = 4096,
                     output_dim = 256,
@@ -76,7 +60,7 @@ def config_builder(args):
                 )
         
         case "dino":
-            if train_config["dataset"] == "imagenet":
+            if args.dataset == "imagenet":
                 model_config["projection_head_kwargs"] = dict(
                     hidden_dim = 2048,
                     bottleneck_dim = 256,
@@ -113,7 +97,7 @@ def config_builder(args):
                 )
         
         case "moco":
-            if train_config["dataset"] == "imagenet":
+            if args.dataset == "imagenet":
                 model_config["projection_head_kwargs"] = dict(
                     hidden_dim = 2048,  
                     output_dim = 65536,
@@ -136,7 +120,7 @@ def config_builder(args):
                 )
 
         case "simclr":
-            if train_config["dataset"] == "imagenet":
+            if args.dataset == "imagenet":
                 model_config["projection_head_kwargs"] = dict(
                     hidden_dim = 2048,  
                     output_dim = 2048,
@@ -149,7 +133,7 @@ def config_builder(args):
                 )
 
         case "swav":
-            if train_config["dataset"] == "imagenet":
+            if args.dataset == "imagenet":
                 model_config["projection_head_kwargs"] = dict(
                     hidden_dim = 2048,  
                     output_dim = 2048,
@@ -170,7 +154,7 @@ def config_builder(args):
                 )
         
         case "vicreg":
-            if train_config["dataset"] == "imagenet":
+            if args.dataset == "imagenet":
                 model_config["projection_head_kwargs"] = dict(
                     hidden_dim = 8192,
                     output_dim = 8192,
@@ -184,8 +168,8 @@ def config_builder(args):
                     num_layers = 3,
                 )
         case _:
-            raise NotImplementedError(f"SSL {train_config['ssl']} not implemented.")
+            raise NotImplementedError(f"SSL {args.ssl} not implemented.")
                
-    return train_config, model_config
+    return model_config
     
     

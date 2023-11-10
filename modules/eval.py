@@ -94,18 +94,20 @@ class LinearClassifier(pl.LightningModule):
         # for linear only (kNN, finetune excluded from on-the-fly eval)
         self.accuracy = torchmetrics.Accuracy(**metric_kwargs)
         self.f1 = torchmetrics.F1Score(average='macro', **metric_kwargs)
-        
-    def on_train_epoch_end(self):
-        metrics = self._epoch_end()
-        return {
-            f"train/{k}": v for k, v in metrics.items()
-        }
-        
+    
+    @property
+    def phase(self):
+        return "train" if self.training else "valid"
+    
+    @property
+    def name(self):
+        return self.eval_type
+
+    def on_validation_epoch_start(self):
+        return self._epoch_end()
+
     def on_validation_epoch_end(self):
-        metrics = self._epoch_end()
-        return {
-            f"valid/{k}": v for k, v in metrics.items()
-        }
+        return self._epoch_end()
         
     def _epoch_end(self):
         metrics = self.metrics()
@@ -125,18 +127,16 @@ class LinearClassifier(pl.LightningModule):
         return loss, y_hat
     
     def training_step(self, batch, batch_idx):
-        loss = self._step(batch, batch_idx)
-        return loss, {f"train/{self.eval_type}-loss": loss}
+        return self._step(batch, batch_idx)
 
     def validation_step(self, batch, batch_idx):
-        loss = self._step(batch, batch_idx)
-        return loss, {f"valid/{self.eval_type}-loss": loss}
+        return self._step(batch, batch_idx)
     
     def _step(self, batch, batch_index):
         z_hat, y = batch
         loss, y_hat = self.forward(z_hat, y)
         self.accumulate(y_hat, y)
-        return loss
+        return loss, {f"{self.phase}/{self.name}-loss": loss}
     
     def reset_metrics(self):
         self.accuracy.reset()
@@ -144,8 +144,8 @@ class LinearClassifier(pl.LightningModule):
         
     def metrics(self):
         return {
-            f"{self.eval_type}-accuracy": self.accuracy.compute(),
-            f"{self.eval_type}-f1": self.f1.compute()
+            f"{self.phase}/{self.name}-accuracy": self.accuracy.compute(),
+            f"{self.phase}/{self.name}-f1": self.f1.compute()
         }
 
 class OnlineLinearClassifier(LinearClassifier):
@@ -165,21 +165,11 @@ class OnlineLinearClassifier(LinearClassifier):
     def on_validation_epoch_end(self):
         # After validation, we would want to reset the parameters of the head (linear probe)
         self.head.reset_parameters()
-        return self._epoch_end()
+        return super().on_validation_epoch_end()
     
-    def training_step(self, batch, batch_idx):
-        loss, loss_dict = super().training_step(batch, batch_idx)
-        return loss, {"train/online-linear-loss": loss_dict["train/linear-loss"]}
-
-    def validation_step(self, batch, batch_idx):
-        loss, loss_dict = super().validation_step(batch, batch_idx)
-        return loss, {"valid/online-linear-loss": loss_dict["valid/linear-loss"]}
-    
-    def metrics(self):
-        return {
-            "online-linear-accuracy": self.accuracy.compute(),
-            "online-linear-f1": self.f1.compute()
-        }
+    @property
+    def name(self):
+        return "online-linear"
         
 class EvalModule(pl.LightningModule):
     def __init__(
@@ -219,9 +209,9 @@ class EvalModule(pl.LightningModule):
         self.log_dict(loss_dict, sync_dist=self.is_distributed)
         return loss
 
-    def on_train_epoch_end(self):
-        linear_metrics = self.linear_head.on_train_epoch_end()
-        knn_metrics = self.knn_head.on_train_epoch_end()
+    def on_validation_epoch_start(self):
+        linear_metrics = self.linear_head.on_validation_epoch_start()
+        knn_metrics = self.knn_head.on_validation_epoch_start()
         self.log_dict({**linear_metrics, **knn_metrics}, sync_dist=self.is_distributed)
     
     def on_validation_epoch_end(self):
