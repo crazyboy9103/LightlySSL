@@ -60,7 +60,10 @@ class VICReg(BaseModule):
         base_lr = _get_base_learning_rate(global_batch_size=global_batch_size)
         optimizer = LARS(
             [
-                {"name": "vicreg", "params": params},
+                {
+                    "name": "vicreg_weight_decay", 
+                    "params": params
+                },
                 {
                     "name": "vicreg_no_weight_decay",
                     "params": params_no_weight_decay,

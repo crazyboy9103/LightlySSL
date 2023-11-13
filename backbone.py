@@ -32,8 +32,16 @@ def backbone_builder(backbone_name, checkpoint_path=""):
     elif "resnet" in backbone_name or "resnext" in backbone_name:
         backbone.fc = nn.Identity()
     
+    # TODO: load checkpoint using LightningModule.load_from_checkpoint
     if checkpoint_path:
-        backbone.load_state_dict(torch.load(checkpoint_path))
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")["state_dict"]
+        checkpoint_buffer = {}
+        for key, value in checkpoint.items():
+            if key.startswith("backbone."):
+                key = key.replace("backbone.", "")
+                checkpoint_buffer[key] = value
+        
+        backbone.load_state_dict(checkpoint_buffer)
     
     input_size = 224
     backbone.eval()

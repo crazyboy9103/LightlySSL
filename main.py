@@ -87,13 +87,14 @@ def main(args):
         
         model = models[args.ssl](backbone, args.batch_size, **model_config)
         
+        # model = torch.compile(model)
         pretrainer = trainer_builder(
             devices,
             f'./checkpoints/ssl/{args.ssl}/{args.backbone}/{args.dataset}', 
             logger,
             "train/ssl-loss", # "train/ssl-loss", "train/online-linear-loss", "valid/online-linear-loss", "train/online-linear-accuracy", "valid/online-linear-accuracy"
             "min",
-            args.eval_epochs
+            args.pretrain_epochs
         )
     
         train_data.transform = train_transform
@@ -119,7 +120,7 @@ def main(args):
             logger,
             "valid/linear-loss", # "train/linear-loss", "valid/linear-loss", "train/linear-accuracy", "valid/linear-accuracy"
             "min",
-            args.pretrain_epochs
+            args.eval_epochs
         )
     
         train_data.transform = test_transform
@@ -146,7 +147,7 @@ def main(args):
     if "train" in args.experiment:
         pretrain()
     
-    if "eval" in args.experiement:
+    if "eval" in args.experiment:
         evaluate()
 
 if __name__ == "__main__":
@@ -161,15 +162,15 @@ if __name__ == "__main__":
     
     # model args
     parser.add_argument("--backbone", type=str, default="resnet50", choices=AVAILABLE_BACKBONES)
-    parser.add_argument("--backbone_checkpoint", type=str, default="")
+    parser.add_argument("--backbone_checkpoint", type=str, default="./checkpoints/ssl/barlowtwins/resnet50/cifar10/epoch=325-step=31948.ckpt")
     # training args
     parser.add_argument("--num_gpus", type=int, default=4)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--num_workers", type=int, default=8)
-    parser.add_argument("--experiment", type=str, default="train+eval")
+    parser.add_argument("--experiment", type=str, default="eval")
     # pretrain args
     parser.add_argument("--pretrain_epochs", type=int, default=400)
-    parser.add_argument("--ssl", type=str, default="byol", choices=["barlowtwins", "byol", "dino", "moco", "simclr", "swav", "vicreg"])
+    parser.add_argument("--ssl", type=str, default="barlowtwins", choices=["barlowtwins", "byol", "dino", "moco", "simclr", "swav", "vicreg"])
     # eval args
     parser.add_argument("--eval_epochs", type=int, default=100)
     parser.add_argument("--sl", type=str, default="linear", choices=["linear", "finetune"])

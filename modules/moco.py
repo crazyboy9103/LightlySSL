@@ -78,11 +78,11 @@ class MoCo(BaseModule):
         (x_query, x_key), y = batch
         z_query, query = self.forward(x_query)
         with torch.no_grad():
-            x_key, shuffle = batch_shuffle(x_key)
+            x_key, shuffle = batch_shuffle(x_key, distributed=self.is_distributed)
             _, key = self.forward_momentum(x_key)
-            key = batch_unshuffle(key, shuffle)
+            key = batch_unshuffle(key, shuffle, distributed=self.is_distributed)
         
-        loss = self.criterion(query, key)
+        loss = 0.5 * (self.criterion(query, key) + self.criterion(key, query))
         return {
             "loss": loss, 
             "embedding": z_query.detach(),
@@ -99,9 +99,12 @@ class MoCo(BaseModule):
         # https://github.com/facebookresearch/dino#resnet-50-and-other-convnets-trainings
         optimizer = SGD(
             [
-                {"name": "dino", "params": params},
                 {
-                    "name": "dino_no_weight_decay",
+                    "name": "moco_weight_decay", 
+                    "params": params
+                },
+                {
+                    "name": "moco_no_weight_decay",
                     "params": params_no_weight_decay,
                     "weight_decay": 0.0,
                 },

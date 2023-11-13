@@ -56,7 +56,10 @@ class SimCLR(BaseModule):
         )
         optimizer = LARS(
             [
-                {"name": "simclr", "params": params},
+                {
+                    "name": "simclr_weight_decay", 
+                    "params": params
+                },
                 {
                     "name": "simclr_no_weight_decay",
                     "params": params_no_weight_decay,

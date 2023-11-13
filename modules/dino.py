@@ -108,7 +108,10 @@ class DINO(BaseModule):
         # https://github.com/facebookresearch/dino#resnet-50-and-other-convnets-trainings
         optimizer = SGD(
             [
-                {"name": "dino", "params": params},
+                {
+                    "name": "dino_weight_decay", 
+                    "params": params
+                },
                 {
                     "name": "dino_no_weight_decay",
                     "params": params_no_weight_decay,
@@ -146,7 +149,7 @@ class DINO(BaseModule):
     ) -> None:
         self.clip_gradients(
             optimizer=optimizer,
-            gradient_clip_val=gradient_clip_val or 3.0,
+            gradient_clip_val=gradient_clip_val or 2.0,
             gradient_clip_algorithm=gradient_clip_algorithm or "norm",
         )
         self.projection_head.cancel_last_layer_gradients(self.current_epoch)

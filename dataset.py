@@ -120,7 +120,7 @@ def transform_builder(
                 )
                 
             case "moco":
-                train_transform = SimCLRTransform(
+                train_transform = MoCoV2Transform(
                     input_size = input_size,
                     normalize = norm_stats,
                 )

@@ -56,16 +56,18 @@ class BYOL(BaseModule):
         self.save_hyperparameters(online_linear_head_kwargs)
         
     def forward(self, x):
-        z = self.backbone(x).flatten(start_dim=1)
-        y = self.projection_head(z)
-        p = self.prediction_head(y)
-        return z, p
+        # here we use different notation from the paper to maintain consistency
+        # z: embedding, y: projection, p: prediction
+        y = self.backbone(x).flatten(start_dim=1)
+        z = self.projection_head(y)
+        p = self.prediction_head(z)
+        return y, p
 
     def forward_momentum(self, x):
-        z = self.backbone_momentum(x).flatten(start_dim=1)
-        y = self.projection_head_momentum(z)
-        y = y.detach()
-        return y
+        y = self.backbone_momentum(x).flatten(start_dim=1)
+        z = self.projection_head_momentum(y)
+        z = z.detach()
+        return z
     
     def training_output(self, batch, batch_index):
         momentum = cosine_schedule(
@@ -77,14 +79,14 @@ class BYOL(BaseModule):
         update_momentum(self.backbone, self.backbone_momentum, m=momentum)
         update_momentum(self.projection_head, self.projection_head_momentum, m=momentum)
         (x0, x1), y = batch
-        z0, p0 = self.forward(x0)
-        y0 = self.forward_momentum(x0)
-        _, p1 = self.forward(x1)
-        y1 = self.forward_momentum(x1)
-        loss = 2 * (self.criterion(p0, y1) + self.criterion(p1, y0))
+        y0, p0 = self.forward(x0)
+        y1, p1 = self.forward(x1)
+        z0 = self.forward_momentum(x0)
+        z1 = self.forward_momentum(x1)
+        loss = 2 * (self.criterion(p0, z1) + self.criterion(p1, z0)) # truncate constant 2 from loss (2-2cos(p, z))
         return {
             "loss": loss, 
-            "embedding": z0.detach(),
+            "embedding": y0.detach(),
             "target": y
         }
 

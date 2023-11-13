@@ -51,7 +51,7 @@ class BaseModule(pl.LightningModule):
         metrics = self.online_linear_head.on_validation_epoch_end()
         self.log_dict(metrics, sync_dist=self.is_distributed)
     
-    def on_validation_epoch_start(self):
-        metrics = self.online_linear_head.on_validation_epoch_start()
+    def on_train_epoch_end(self):
+        metrics = self.online_linear_head.on_train_epoch_end()
         self.log_dict(metrics, sync_dist=self.is_distributed)
         
