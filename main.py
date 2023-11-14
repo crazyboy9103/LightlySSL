@@ -25,7 +25,7 @@ def trainer_builder(
     trainer = pl.Trainer(
         logger=logger, 
         max_epochs=epochs,
-        precision="32",
+        precision="16-mixed",
         benchmark=True,
         callbacks=[
             ModelCheckpoint(dirpath=checkpoint_path, save_top_k=2, monitor=metric_name, mode=metric_mode),
@@ -166,10 +166,10 @@ if __name__ == "__main__":
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--experiment", type=str, default="train+eval")
     # pretrain args
-    parser.add_argument("--pretrain_epochs", type=int, default=50)
+    parser.add_argument("--pretrain_epochs", type=int, default=400)
     parser.add_argument("--ssl", type=str, default="byol", choices=["barlowtwins", "byol", "dino", "moco", "simclr", "swav", "vicreg"])
     # eval args
-    parser.add_argument("--eval_epochs", type=int, default=10)
+    parser.add_argument("--eval_epochs", type=int, default=100)
     parser.add_argument("--sl", type=str, default="linear", choices=["linear", "finetune"])
     parser.add_argument("--k", type=int, default=20, help="Number of neighbors for kNN")
     parser.add_argument("--label_smoothing", type=float, default=0.0)
