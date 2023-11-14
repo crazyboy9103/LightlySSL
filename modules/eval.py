@@ -169,7 +169,7 @@ class LinearClassifier(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         return self._step(batch, batch_idx)
     
-    def _step(self, batch, batch_index):
+    def _step(self, batch, batch_index, accumulate=True):
         z_hat, y = batch
         
         if self.eval_type == "linear":
@@ -178,7 +178,9 @@ class LinearClassifier(pl.LightningModule):
         y_hat = self.head(z_hat)
         loss = F.cross_entropy(y_hat, y, label_smoothing=self.label_smoothing if self.training else 0.0)
 
-        self.accumulate(y_hat, y)
+        if accumulate:
+            self.accumulate(y_hat, y)
+            
         return loss, {f"{self.phase}/{self.name}-loss": loss}
     
     def reset_metrics(self):
@@ -212,10 +214,11 @@ class OnlineLinearClassifier(LinearClassifier):
             eval_type = "linear"
         )
         
-    def on_validation_epoch_end(self):
-        # After validation, we would want to reset the parameters of the head (linear probe)
-        # self.head.reset_parameters()
-        return super().on_validation_epoch_end()
+    # def on_train_epoch_end(self):
+    #     # At every epoch, we would want to reset 
+    #     # the parameters of the linear classifier
+    #     self.head.reset_parameters()
+    #     return super().on_train_epoch_end()
     
     @property
     def name(self):

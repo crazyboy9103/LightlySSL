@@ -95,8 +95,8 @@ class DINO(BaseModule):
             "target": targets
         }
 
-    def on_after_backward(self):
-        self.projection_head.cancel_last_layer_gradients(current_epoch=self.current_epoch)
+    # def on_after_backward(self):
+    #     self.projection_head.cancel_last_layer_gradients(current_epoch=self.current_epoch)
         
     def configure_optimizers(self):
         # Don't use weight decay for batch norm, bias parameters, and classification
@@ -141,15 +141,15 @@ class DINO(BaseModule):
         }
         return [optimizer], [scheduler]
     
-    def configure_gradient_clipping(
-        self,
-        optimizer: Optimizer,
-        gradient_clip_val: Union[int, float, None] = None,
-        gradient_clip_algorithm: Union[str, None] = None,
-    ) -> None:
-        self.clip_gradients(
-            optimizer=optimizer,
-            gradient_clip_val=gradient_clip_val or 2.0,
-            gradient_clip_algorithm=gradient_clip_algorithm or "norm",
-        )
-        self.projection_head.cancel_last_layer_gradients(self.current_epoch)
+    # def configure_gradient_clipping(
+    #     self,
+    #     optimizer: Optimizer,
+    #     gradient_clip_val: Union[int, float, None] = None,
+    #     gradient_clip_algorithm: Union[str, None] = None,
+    # ) -> None:
+    #     self.clip_gradients(
+    #         optimizer=optimizer,
+    #         gradient_clip_val=gradient_clip_val or 2.0,
+    #         gradient_clip_algorithm=gradient_clip_algorithm or "norm",
+    #     )
+    #     self.projection_head.cancel_last_layer_gradients(self.current_epoch)

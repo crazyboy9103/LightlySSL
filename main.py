@@ -59,7 +59,7 @@ def main(args):
         args.data_root, 
     )
 
-    experiment_name = f'{args.ssl}_{args.backbone}_{args.dataset}'
+    experiment_name = f'{args.ssl}_{args.backbone}_{args.dataset}_noreset'
     logger = WandbLogger(
         project="ssl-lightly",
         name=experiment_name,
@@ -176,7 +176,7 @@ if __name__ == "__main__":
     
     # misc
     parser.add_argument("--seed", type=int, default=2023)
-    parser.add_argument("--wandb", action="store_true", default=False)
+    parser.add_argument("--wandb", action="store_true", default=True)
 
     args = parser.parse_args()
 

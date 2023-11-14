@@ -52,6 +52,16 @@ class BaseModule(pl.LightningModule):
         self.log_dict(metrics, sync_dist=self.is_distributed)
     
     def on_train_epoch_end(self):
+        # self.backbone.eval()
+        # with torch.no_grad():
+        #     for views, y in self.trainer.train_dataloader:
+        #         # just use the first view to extract features
+        #         y = y.cuda()
+        #         x = views[0].cuda()
+        #         z = self.backbone(x)
+        #         loss, loss_dict = self.online_linear_head._step((z, y), batch_index=None, accumulate=True)
+
+        # self.backbone.train()
         metrics = self.online_linear_head.on_train_epoch_end()
         self.log_dict(metrics, sync_dist=self.is_distributed)
         
