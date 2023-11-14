@@ -214,7 +214,7 @@ class OnlineLinearClassifier(LinearClassifier):
         
     def on_validation_epoch_end(self):
         # After validation, we would want to reset the parameters of the head (linear probe)
-        self.head.reset_parameters()
+        # self.head.reset_parameters()
         return super().on_validation_epoch_end()
     
     @property
