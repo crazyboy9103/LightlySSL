@@ -1,17 +1,14 @@
 import os
 
 import torch
-from torch.utils.data import DataLoader
 import pytorch_lightning as pl
-from pytorch_lightning.strategies import ParallelStrategy
-from pytorch_lightning.callbacks import ModelCheckpoint, ModelSummary, EarlyStopping
+from pytorch_lightning.callbacks import ModelCheckpoint, ModelSummary, LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from pytorch_lightning.accelerators import find_usable_cuda_devices
 
 from dataset import dataset_builder, DataModule
 from backbone import backbone_builder
 from config import config_builder
-
 from modules import BarlowTwins, BYOL, DINO, MoCo, SimCLR, SwAV, VICReg
 from modules import EvalModule
 
@@ -33,13 +30,13 @@ def trainer_builder(
         callbacks=[
             ModelCheckpoint(dirpath=checkpoint_path, save_top_k=2, monitor=metric_name, mode=metric_mode),
             ModelSummary(max_depth=-1),
-            # EarlyStopping(monitor=metric_name, patience=10, mode=metric_mode, verbose=True)
+            LearningRateMonitor(logging_interval="step")
         ],
-        fast_dev_run = False,
-        sync_batchnorm=True,
+        fast_dev_run=False,
+        sync_batchnorm=len(devices) > 1,
         devices=devices,
         log_every_n_steps=1,
-        strategy="auto", # "ddp_find_unused_parameters_true",
+        strategy="ddp" if len(devices) > 1 else "auto", 
         num_sanity_val_steps=0,
         use_distributed_sampler = True,
     )
@@ -92,8 +89,8 @@ def main(args):
             devices,
             f'./checkpoints/ssl/{args.ssl}/{args.backbone}/{args.dataset}', 
             logger,
-            "train/ssl-loss", # "train/ssl-loss", "train/online-linear-loss", "valid/online-linear-loss", "train/online-linear-accuracy", "valid/online-linear-accuracy"
-            "min",
+            "valid/online-linear-accuracy", # "train/ssl-loss", "train/online-linear-loss", "valid/online-linear-loss", "train/online-linear-accuracy", "valid/online-linear-accuracy"
+            "max",
             args.pretrain_epochs
         )
     
@@ -118,8 +115,8 @@ def main(args):
             devices,
             f'./checkpoints/sl/{args.sl}/{args.backbone}/{args.dataset}', 
             logger,
-            "valid/linear-loss", # "train/linear-loss", "valid/linear-loss", "train/linear-accuracy", "valid/linear-accuracy"
-            "min",
+            "valid/linear-accuracy", # "train/linear-loss", "valid/linear-loss", "train/linear-accuracy", "valid/linear-accuracy"
+            "max",
             args.eval_epochs
         )
     
@@ -161,26 +158,29 @@ if __name__ == "__main__":
     parser.add_argument("--data_root", type=str, default="./data")
     
     # model args
-    parser.add_argument("--backbone", type=str, default="resnet50", choices=AVAILABLE_BACKBONES)
-    parser.add_argument("--backbone_checkpoint", type=str, default="./checkpoints/ssl/barlowtwins/resnet50/cifar10/epoch=325-step=31948.ckpt")
+    parser.add_argument("--backbone", type=str, default="resnet18", choices=AVAILABLE_BACKBONES)
+    parser.add_argument("--backbone_checkpoint", type=str, default="")
     # training args
     parser.add_argument("--num_gpus", type=int, default=4)
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--num_workers", type=int, default=8)
-    parser.add_argument("--experiment", type=str, default="eval")
+    parser.add_argument("--experiment", type=str, default="train+eval")
     # pretrain args
-    parser.add_argument("--pretrain_epochs", type=int, default=400)
-    parser.add_argument("--ssl", type=str, default="barlowtwins", choices=["barlowtwins", "byol", "dino", "moco", "simclr", "swav", "vicreg"])
+    parser.add_argument("--pretrain_epochs", type=int, default=50)
+    parser.add_argument("--ssl", type=str, default="byol", choices=["barlowtwins", "byol", "dino", "moco", "simclr", "swav", "vicreg"])
     # eval args
-    parser.add_argument("--eval_epochs", type=int, default=100)
+    parser.add_argument("--eval_epochs", type=int, default=10)
     parser.add_argument("--sl", type=str, default="linear", choices=["linear", "finetune"])
     parser.add_argument("--k", type=int, default=20, help="Number of neighbors for kNN")
     parser.add_argument("--label_smoothing", type=float, default=0.0)
     
     # misc
     parser.add_argument("--seed", type=int, default=2023)
-    parser.add_argument("--wandb", action="store_true", default=True)
+    parser.add_argument("--wandb", action="store_true", default=False)
 
     args = parser.parse_args()
 
+    # each device sees a batch size divided by the number of devices
+    # as lightning sends same number of samples to each device
+    args.batch_size = args.batch_size // args.num_gpus
     main(args)

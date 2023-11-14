@@ -125,11 +125,19 @@ def config_builder(args):
                     hidden_dim = 2048,  
                     output_dim = 2048,
                 )
+                
+                model_config["loss_kwargs"] = dict(
+                    temperature = 0.1,
+                )
             
             else:
                 model_config["projection_head_kwargs"] = dict(
                     hidden_dim = 512,  
                     output_dim = 128,
+                )
+                
+                model_config["loss_kwargs"] = dict(
+                    temperature = 0.5,
                 )
 
         case "swav":

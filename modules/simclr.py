@@ -13,6 +13,7 @@ class SimCLR(BaseModule):
         backbone, 
         batch_size_per_device,
         projection_head_kwargs = dict(hidden_dim=2048, output_dim=2048),
+        loss_kwargs = dict(temperature=0.5),
         online_linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1),
     ):
         super().__init__(
@@ -27,13 +28,16 @@ class SimCLR(BaseModule):
                 **online_linear_head_kwargs
             )
         )
-        self.criterion = NTXentLoss(gather_distributed=self.is_distributed)
+        self.criterion = NTXentLoss(
+            gather_distributed=self.is_distributed,
+            **loss_kwargs
+        )
         
         self.save_hyperparameters(projection_head_kwargs)
         self.save_hyperparameters(online_linear_head_kwargs)
         
     def forward(self, x):
-        z = self.backbone(x).flatten(start_dim=1)
+        z = self.backbone(x)
         p = self.projection_head(z)
         return z, p
 
@@ -76,11 +80,11 @@ class SimCLR(BaseModule):
             # linear scaling can be used for larger batches and longer training:
             #   lr=0.3 * self.batch_size_per_device * self.trainer.world_size / 256
             # See Appendix B.1. in the SimCLR paper https://arxiv.org/abs/2002.05709
-            lr=0.075 * (self.batch_size_per_device * self.trainer.world_size) ** 0.5,
+            lr=0.3 * self.batch_size_per_device * self.trainer.world_size / 256,
             momentum=0.9,
             # Note: Paper uses weight decay of 1e-6 but reference code 1e-4. See:
             # https://github.com/google-research/simclr/blob/2fc637bdd6a723130db91b377ac15151e01e4fc2/README.md?plain=1#L103
-            weight_decay=1e-6,
+            weight_decay=1e-4,
         )
         scheduler = {
             "scheduler": CosineWarmupScheduler(

@@ -43,7 +43,7 @@ class BaseModule(pl.LightningModule):
 
     def validation_step(self, batch, batch_index):
         x, y = batch
-        z = self.backbone(x).flatten(start_dim=1)
+        z = self.backbone(x)
         _, loss_dict = self.online_linear_head.validation_step((z, y), batch_index)
         self.log_dict(loss_dict, sync_dist=self.is_distributed)
     

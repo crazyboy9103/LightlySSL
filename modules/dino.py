@@ -60,12 +60,12 @@ class DINO(BaseModule):
         
         
     def forward(self, x):
-        y = self.backbone(x).flatten(start_dim=1)
+        y = self.backbone(x)
         z = self.projection_head(y)
         return y, z
 
     def forward_teacher(self, x):
-        y = self.teacher_backbone(x).flatten(start_dim=1)
+        y = self.teacher_backbone(x)
         z = self.teacher_projection_head(y)
         return y, z
 

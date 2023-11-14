@@ -59,7 +59,7 @@ class SwAV(BaseModule):
         self.save_hyperparameters(online_linear_head_kwargs)
         
     def forward(self, x):
-        z = self.backbone(x).flatten(start_dim=1)
+        z = self.backbone(x)
         p = self.projection_head(z)
         proj = F.normalize(p, dim=1, p=2)
         proto = self.prototypes(proj, step=self.current_epoch)

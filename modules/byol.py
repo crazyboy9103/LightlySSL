@@ -58,13 +58,13 @@ class BYOL(BaseModule):
     def forward(self, x):
         # here we use different notation from the paper to maintain consistency
         # z: embedding, y: projection, p: prediction
-        y = self.backbone(x).flatten(start_dim=1)
+        y = self.backbone(x)
         z = self.projection_head(y)
         p = self.prediction_head(z)
         return y, p
 
     def forward_momentum(self, x):
-        y = self.backbone_momentum(x).flatten(start_dim=1)
+        y = self.backbone_momentum(x)
         z = self.projection_head_momentum(y)
         z = z.detach()
         return z

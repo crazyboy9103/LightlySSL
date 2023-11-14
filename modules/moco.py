@@ -57,12 +57,12 @@ class MoCo(BaseModule):
         self.save_hyperparameters(online_linear_head_kwargs)
         
     def forward(self, x):
-        z = self.backbone(x).flatten(start_dim=1)
+        z = self.backbone(x)
         query = self.projection_head(z)
         return z, query
 
     def forward_momentum(self, x):
-        z = self.backbone_momentum(x).flatten(start_dim=1)
+        z = self.backbone_momentum(x)
         key = self.projection_head_momentum(z).detach()
         return z, key    
     

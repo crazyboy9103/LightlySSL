@@ -34,7 +34,7 @@ class BarlowTwins(BaseModule):
         self.save_hyperparameters(online_linear_head_kwargs)
         
     def forward(self, x):
-        z = self.backbone(x).flatten(start_dim=1)
+        z = self.backbone(x)
         p = self.projection_head(z)
         return z, p
 

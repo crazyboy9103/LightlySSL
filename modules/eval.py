@@ -65,7 +65,7 @@ class kNNClassifier(pl.LightningModule):
             self.z_train.append(z_hat.detach())
             self.y_train.append(y.detach())
         
-        # at validation time, we add knn predictions to the metrics 
+        # at validation time, we add knn predictions to the torchmetrics 
         else:
             if self.z_train_gathered == None and self.y_train_gathered == None:
                 self.z_train_gathered = self.all_gather(torch.cat(self.z_train))
@@ -106,6 +106,9 @@ class kNNClassifier(pl.LightningModule):
             "valid/knn-f1": self.f1.compute()
         }
 
+# Re-written classifier, since we want to have separate metrics for train and valid
+# This only records epoch-wise metrics, to avoid class imbalance issues with mini-batch metrics
+# To do this, it accumulates preds/targets at every training/validation step, and computes metrics at every on_train/valid_epoch_end
 class LinearClassifier(pl.LightningModule):
     def __init__(
         self,
@@ -160,14 +163,6 @@ class LinearClassifier(pl.LightningModule):
         accuracy(y_hat, y)
         f1(y_hat, y)
         
-    def forward(self, z_hat, y):
-        if self.eval_type == "linear":
-            z_hat = z_hat.detach()
-            
-        y_hat = self.head(z_hat.flatten(start_dim=1))
-        loss = F.cross_entropy(y_hat, y, label_smoothing=self.label_smoothing if self.training else 0.0)
-        return loss, y_hat
-    
     def training_step(self, batch, batch_idx):
         return self._step(batch, batch_idx)
 
@@ -176,7 +171,13 @@ class LinearClassifier(pl.LightningModule):
     
     def _step(self, batch, batch_index):
         z_hat, y = batch
-        loss, y_hat = self.forward(z_hat, y)
+        
+        if self.eval_type == "linear":
+            z_hat = z_hat.detach()
+            
+        y_hat = self.head(z_hat)
+        loss = F.cross_entropy(y_hat, y, label_smoothing=self.label_smoothing if self.training else 0.0)
+
         self.accumulate(y_hat, y)
         return loss, {f"{self.phase}/{self.name}-loss": loss}
     
@@ -254,30 +255,47 @@ class EvalModule(pl.LightningModule):
         elif eval_type == "finetune":
             activate_requires_grad(self.backbone)
             self.backbone.train()
-            
+        
+        self.eval_type = eval_type
+        
+    @property
+    def should_knn_eval(self):
+        # for linear probe, we only evaluate once, at the start of the epoch, 
+        # as the backbone is not updated during training
+        if self.eval_type == "linear":
+            return self.current_epoch == 0
+        
+        return True
+    
     def training_step(self, batch, batch_index):
         x, y = batch
         zhat = self.backbone(x)
         loss, loss_dict = self.linear_head.training_step([zhat, y], batch_index)
-        self.knn_head.training_step([zhat, y], batch_index)
+        if self.should_knn_eval:
+            self.knn_head.training_step([zhat, y], batch_index)
+            
         self.log_dict(loss_dict, sync_dist=self.is_distributed)
         return loss
 
     def on_train_epoch_end(self):
         linear_metrics = self.linear_head.on_train_epoch_end()
-        # knn_metrics = self.knn_head.on_train_epoch_end()
         self.log_dict(linear_metrics, sync_dist=self.is_distributed)
     
     def on_validation_epoch_end(self):
         linear_metrics = self.linear_head.on_validation_epoch_end()
-        knn_metrics = self.knn_head.on_validation_epoch_end()
-        self.log_dict({**linear_metrics, **knn_metrics}, sync_dist=self.is_distributed)
+        if self.should_knn_eval:
+            knn_metrics = self.knn_head.on_validation_epoch_end()
+            linear_metrics.update(knn_metrics)
+            
+        self.log_dict(linear_metrics, sync_dist=self.is_distributed)
         
     def validation_step(self, batch, batch_index):
         x, y = batch
         zhat = self.backbone(x)
         _, loss_dict = self.linear_head.validation_step([zhat, y], batch_index)
-        self.knn_head.validation_step([zhat, y], batch_index)
+        if self.should_knn_eval:
+            self.knn_head.validation_step([zhat, y], batch_index)
+            
         self.log_dict(loss_dict, sync_dist=self.is_distributed)
     
     def configure_optimizers(self):
