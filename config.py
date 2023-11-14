@@ -22,7 +22,11 @@ def config_builder(args):
         online_linear_head_kwargs = dict(
             num_classes = num_classes, 
             label_smoothing = args.label_smoothing,
-        )
+        ),
+        online_knn_head_kwargs = dict(
+            num_classes = num_classes, 
+            k = args.k
+        ),
     )
     
     match args.ssl:

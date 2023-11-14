@@ -5,7 +5,7 @@ from lightly.utils.lars import LARS
 from lightly.utils.scheduler import CosineWarmupScheduler
 
 from .base import BaseModule
-from .eval import OnlineLinearClassifier
+from .eval import OnlineLinearClassifier, kNNClassifier
 
 class BarlowTwins(BaseModule):
     def __init__(
@@ -14,6 +14,7 @@ class BarlowTwins(BaseModule):
         batch_size_per_device,
         projection_head_kwargs = dict(hidden_dim=2048, output_dim=2048),
         online_linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1),
+        online_knn_head_kwargs = dict(num_classes=10, k=20)
     ):
         super().__init__(
             backbone, 
@@ -25,6 +26,9 @@ class BarlowTwins(BaseModule):
             online_linear_head=OnlineLinearClassifier(
                 input_dim=backbone.output_dim, 
                 **online_linear_head_kwargs
+            ),
+            online_knn_head=kNNClassifier(
+                **online_knn_head_kwargs
             )
         )
         
@@ -32,6 +36,7 @@ class BarlowTwins(BaseModule):
         
         self.save_hyperparameters(projection_head_kwargs)
         self.save_hyperparameters(online_linear_head_kwargs)
+        self.save_hyperparameters(online_knn_head_kwargs)
         
     def forward(self, x):
         z = self.backbone(x)

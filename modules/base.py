@@ -13,6 +13,7 @@ class BaseModule(pl.LightningModule):
         prediction_head: Optional[nn.Module] = None,
         prototypes: Optional[nn.Module] = None,
         online_linear_head: Optional[nn.Module] = None,
+        online_knn_head: Optional[nn.Module] = None
     ):
         super().__init__()
 
@@ -22,7 +23,8 @@ class BaseModule(pl.LightningModule):
         self.prediction_head = prediction_head
         self.prototypes = prototypes
         self.online_linear_head = online_linear_head
-        
+        self.online_knn_head = online_knn_head
+                
         self.is_distributed = torch.cuda.device_count() > 1
 
     def training_output(self, batch, batch_index):
@@ -31,10 +33,11 @@ class BaseModule(pl.LightningModule):
     def training_step(self, batch, batch_index):
         output = self.training_output(batch, batch_index)
         ssl_loss = output["loss"]
-        embedding = output["embedding"]
-        target = output["target"]
+        embedding = output["embedding"].detach()
+        target = output["target"].detach()
         
-        cls_loss, cls_loss_dict = self.online_linear_head.training_step((embedding.detach(), target), batch_index)
+        cls_loss, cls_loss_dict = self.online_linear_head.training_step((embedding, target), batch_index)
+        self.online_knn_head.training_step((embedding, target), batch_index)
         self.log_dict({
             "train/ssl-loss": ssl_loss,
             **cls_loss_dict
@@ -45,11 +48,13 @@ class BaseModule(pl.LightningModule):
         x, y = batch
         z = self.backbone(x)
         _, loss_dict = self.online_linear_head.validation_step((z, y), batch_index)
+        self.online_knn_head.validation_step((z, y), batch_index)
         self.log_dict(loss_dict, sync_dist=self.is_distributed)
     
     def on_validation_epoch_end(self):
-        metrics = self.online_linear_head.on_validation_epoch_end()
-        self.log_dict(metrics, sync_dist=self.is_distributed)
+        linear_metrics = self.online_linear_head.on_validation_epoch_end()
+        knn_metrics = self.online_knn_head.on_validation_epoch_end()
+        self.log_dict({**linear_metrics, **knn_metrics}, sync_dist=self.is_distributed)
     
     def on_train_epoch_end(self):
         # self.backbone.eval()

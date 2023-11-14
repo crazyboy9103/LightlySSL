@@ -16,7 +16,7 @@ import torch
 from torch.optim import SGD
 
 from .base import BaseModule
-from .eval import OnlineLinearClassifier
+from .eval import OnlineLinearClassifier, kNNClassifier
 # TODO check https://github.com/facebookresearch/moco for correct implementation
 
 class MoCo(BaseModule):
@@ -27,6 +27,7 @@ class MoCo(BaseModule):
         projection_head_kwargs = dict(hidden_dim=512, output_dim=128),
         loss_kwargs = dict(memory_bank_size=4096),
         online_linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1),
+        online_knn_head_kwargs = dict(num_classes=10, k=20)
     ):
         super().__init__(
             backbone, 
@@ -38,6 +39,9 @@ class MoCo(BaseModule):
             online_linear_head=OnlineLinearClassifier(
                 input_dim=backbone.output_dim, 
                 **online_linear_head_kwargs
+            ),
+            online_knn_head=kNNClassifier(
+                **online_knn_head_kwargs
             )
         )
         
@@ -55,6 +59,7 @@ class MoCo(BaseModule):
         self.save_hyperparameters(projection_head_kwargs)
         self.save_hyperparameters(loss_kwargs)
         self.save_hyperparameters(online_linear_head_kwargs)
+        self.save_hyperparameters(online_knn_head_kwargs)
         
     def forward(self, x):
         z = self.backbone(x)

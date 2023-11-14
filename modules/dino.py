@@ -15,7 +15,7 @@ from torch.optim import SGD
 from torch.optim.optimizer import Optimizer
 
 from .base import BaseModule
-from .eval import OnlineLinearClassifier
+from .eval import OnlineLinearClassifier, kNNClassifier
 
 class DINO(BaseModule):
     def __init__(
@@ -25,6 +25,7 @@ class DINO(BaseModule):
         projection_head_kwargs = dict(hidden_dim=512, bottleneck_dim=64, output_dim=2048),
         loss_kwargs = dict(warmup_teacher_temp_epochs=5),
         online_linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1),
+        online_knn_head_kwargs = dict(num_classes=10, k=20)
     ):
         super().__init__(
             backbone, 
@@ -36,11 +37,15 @@ class DINO(BaseModule):
             online_linear_head=OnlineLinearClassifier(
                 input_dim=backbone.output_dim, 
                 **online_linear_head_kwargs
+            ),
+            online_knn_head=kNNClassifier(
+                **online_knn_head_kwargs
             )
         )
         self.save_hyperparameters(projection_head_kwargs)
         self.save_hyperparameters(loss_kwargs)
         self.save_hyperparameters(online_linear_head_kwargs)
+        self.save_hyperparameters(online_knn_head_kwargs)
         
         # teacher model dont freeze last layer
         projection_head_kwargs.pop("freeze_last_layer", None)
