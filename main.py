@@ -1,4 +1,6 @@
+from typing import List, Dict, Literal
 import os
+from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 import torch
 import pytorch_lightning as pl
@@ -11,6 +13,69 @@ from backbone import backbone_builder
 from config import config_builder
 from modules import BarlowTwins, BYOL, DINO, MoCo, SimCLR, SwAV, VICReg
 from modules import EvalModule
+
+class MetricTracker(pl.Callback):
+    r"""
+    Automatically logs the maximum/minimum value of a metric. 
+
+    Args:
+        metric_config: 
+            example = [
+                {
+                    "name": "train/ssl-loss",
+                    "mode": "min",
+                    "interval": "step",
+                },
+                {
+                    "name": "valid/online-linear-accuracy",
+                    "mode": "max",
+                    "interval": "epoch",
+                },
+            ]
+
+    Example::
+        >>> from pytorch_lightning import Trainer
+        >>> tracker = MetricTracker(example)
+        >>> trainer = Trainer(callbacks=[tracker])
+    """
+    def __init__(self, metric_config: List[Dict[str, str]]):
+        super().__init__()
+        for config in metric_config:
+            assert "name" in config
+            assert "mode" in config and config["mode"] in ["max", "min"]
+            assert "interval" in config and config["interval"] in ["epoch", "step"]
+            config.setdefault("value", -1e8 if config["mode"] == "max" else 1e8)
+            
+        self.epoch_config = [config for config in metric_config if config["interval"] == "epoch"]
+        self.step_config = [config for config in metric_config if config["interval"] == "step"]
+    
+    def _log_metrics(self, trainer, interval: Literal["step", "epoch"]="step"):
+        metrics_to_log = {}
+        
+        config = self.step_config if interval == "step" else self.epoch_config
+        metrics = trainer.callback_metrics
+        for cfg in config:
+            name = cfg["name"]
+            mode = cfg["mode"]
+            
+            if name in metrics:
+                cfg["value"] = max(cfg["value"], metrics[name]) if mode == "max" else min(cfg["value"], metrics[name])
+                metrics_to_log[f"{mode}_{name}"] = cfg["value"]
+                
+        if metrics_to_log and trainer.logger:
+            trainer.logger.log_metrics(metrics_to_log, step=trainer.global_step if interval == "step" else trainer.current_epoch)
+    
+    def on_train_batch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule, outputs, batch, batch_idx):
+        self._log_metrics(trainer, interval="step")
+        
+    def on_train_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+        self._log_metrics(trainer, interval="epoch")
+        
+    def on_validation_batch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule, outputs, batch, batch_idx, dataloader_idx = 0):
+        self._log_metrics(trainer, interval="step")
+    
+    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+        self._log_metrics(trainer, interval="epoch")
 
 def trainer_builder(
     devices,
@@ -28,6 +93,7 @@ def trainer_builder(
         precision="16-mixed",
         benchmark=True,
         callbacks=[
+            MetricTracker([{"name": metric_name, "mode": metric_mode, "interval": "epoch"}]),
             ModelCheckpoint(dirpath=checkpoint_path, save_top_k=2, monitor=metric_name, mode=metric_mode),
             ModelSummary(max_depth=-1),
             LearningRateMonitor(logging_interval="step")
@@ -47,6 +113,7 @@ def main(args):
     devices = find_usable_cuda_devices(args.num_gpus)
     pl.seed_everything(args.seed)
     torch.set_float32_matmul_precision('medium')
+    # torch.set_float32_matmul_precision('high')
     
     backbone = backbone_builder(
         args.backbone, 

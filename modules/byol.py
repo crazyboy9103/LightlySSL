@@ -12,7 +12,7 @@ from lightly.utils.scheduler import cosine_schedule
 from lightly.utils.scheduler import CosineWarmupScheduler
 
 from .base import BaseModule
-from .eval import OnlineLinearClassifier, kNNClassifier
+from .eval import OnlineLinearClassifier, OnlinekNNClassifier
 
 class BYOL(BaseModule):
     def __init__(
@@ -22,7 +22,8 @@ class BYOL(BaseModule):
         projection_head_kwargs = dict(hidden_dim=1024, output_dim=256),
         prediction_head_kwargs = dict(hidden_dim=1024, output_dim=256),
         online_linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1),
-        online_knn_head_kwargs = dict(num_classes=10, k=20)
+        online_knn_head_kwargs = dict(num_classes=10, k=20),
+        optimizer_kwargs = dict(base_lr=0.45)
     ):
         super().__init__(
             backbone, 
@@ -39,7 +40,7 @@ class BYOL(BaseModule):
                 input_dim=backbone.output_dim, 
                 **online_linear_head_kwargs
             ),
-            online_knn_head=kNNClassifier(
+            online_knn_head=OnlinekNNClassifier(
                 **online_knn_head_kwargs
             )
         )
@@ -59,6 +60,7 @@ class BYOL(BaseModule):
         self.save_hyperparameters(prediction_head_kwargs)
         self.save_hyperparameters(online_linear_head_kwargs)
         self.save_hyperparameters(online_knn_head_kwargs)
+        self.save_hyperparameters(optimizer_kwargs)
         
     def forward(self, x):
         # here we use different notation from the paper to maintain consistency
@@ -125,7 +127,7 @@ class BYOL(BaseModule):
             # Settings follow original code for 100 epochs which are slightly different
             # from the paper, see:
             # https://github.com/deepmind/deepmind-research/blob/f5de0ede8430809180254ee957abf36ed62579ef/byol/configs/byol.py#L21-L23
-            lr=0.45 * self.batch_size_per_device * self.trainer.world_size / 256,
+            lr=self.hparams.base_lr * self.batch_size_per_device * self.trainer.world_size / 256,
             momentum=0.9,
             weight_decay=1e-6,
         )

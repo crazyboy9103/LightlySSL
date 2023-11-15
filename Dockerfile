@@ -1,7 +1,7 @@
 ARG CUDA_VERSION=11.7.1
 ARG UBUNTU_VERSION=20.04
-# To use nvcc, devel image must be used
-FROM nvidia/cuda:${CUDA_VERSION}-cudnn8-devel-ubuntu${UBUNTU_VERSION}
+
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn8-runtime-ubuntu${UBUNTU_VERSION}
 
 ARG DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Seoul
@@ -27,17 +27,7 @@ RUN wget https://bootstrap.pypa.io/get-pip.py \
     && rm get-pip.py
 
 WORKDIR /workspace
-# COPY . /workspace
+COPY . /workspace
 
 RUN pip install --upgrade pip && \ 
-    pip install ipykernel \
-                lightly \
-                lightning \ 
-                PyYAML \
-                timm \
-                torch \
-                torchmetrics \
-                torchvision \
-                tqdm \
-                wandb \
-                tensorboard
+    pip install -r requirements.txt

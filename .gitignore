@@ -1,10 +1,14 @@
-.python-version
-
-data/
+# misc
 __pycache__/
+.python-version
+*.tar.gz
+*.db
+
+# data
+data/
+# logs
 checkpoint*/
 wandb/
 *logs*/
+# test
 *test*
-utils.py
-*.tar.gz

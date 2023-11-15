@@ -106,6 +106,14 @@ class kNNClassifier(pl.LightningModule):
             "valid/knn-f1": self.f1.compute()
         }
 
+class OnlinekNNClassifier(kNNClassifier):
+    def metrics(self):
+        # only valid for knn
+        return {
+            "valid/online-knn-accuracy": self.accuracy.compute(),
+            "valid/online-knn-f1": self.f1.compute()
+        }
+
 # Re-written classifier, since we want to have separate metrics for train and valid
 # This only records epoch-wise metrics, to avoid class imbalance issues with mini-batch metrics
 # To do this, it accumulates preds/targets at every training/validation step, and computes metrics at every on_train/valid_epoch_end
@@ -213,13 +221,7 @@ class OnlineLinearClassifier(LinearClassifier):
             label_smoothing = label_smoothing, 
             eval_type = "linear"
         )
-        
-    # def on_train_epoch_end(self):
-    #     # At every epoch, we would want to reset 
-    #     # the parameters of the linear classifier
-    #     self.head.reset_parameters()
-    #     return super().on_train_epoch_end()
-    
+            
     @property
     def name(self):
         return "online-linear"

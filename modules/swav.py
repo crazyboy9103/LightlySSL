@@ -12,7 +12,7 @@ from lightly.utils.lars import LARS
 from lightly.utils.scheduler import CosineWarmupScheduler
 
 from .base import BaseModule
-from .eval import OnlineLinearClassifier, kNNClassifier
+from .eval import OnlineLinearClassifier, OnlinekNNClassifier
 
 class SwAV(BaseModule):
     def __init__(
@@ -22,7 +22,8 @@ class SwAV(BaseModule):
         projection_head_kwargs = dict(hidden_dim=512, output_dim=128),
         prototype_kwargs = dict(n_prototypes=512),
         online_linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1),
-        online_knn_head_kwargs = dict(num_classes=10, k=20)
+        online_knn_head_kwargs = dict(num_classes=10, k=20),
+        optimizer_kwargs = dict(base_lr=0.6)
     ):
         super().__init__(
             backbone, 
@@ -39,7 +40,7 @@ class SwAV(BaseModule):
                 input_dim=backbone.output_dim, 
                 **online_linear_head_kwargs
             ),
-            online_knn_head=kNNClassifier(
+            online_knn_head=OnlinekNNClassifier(
                 **online_knn_head_kwargs
             )
         )
@@ -62,6 +63,7 @@ class SwAV(BaseModule):
         self.save_hyperparameters(prototype_kwargs)
         self.save_hyperparameters(online_linear_head_kwargs)
         self.save_hyperparameters(online_knn_head_kwargs)
+        self.save_hyperparameters(optimizer_kwargs)
         
     def forward(self, x):
         z = self.backbone(x)
@@ -157,7 +159,7 @@ class SwAV(BaseModule):
             # Smaller learning rate for smaller batches: lr=0.6 for batch_size=256
             # scaled linearly by batch size to lr=4.8 for batch_size=2048.
             # See Appendix A.1. and A.6. in SwAV paper https://arxiv.org/pdf/2006.09882.pdf
-            lr=0.6 * (self.batch_size_per_device * self.trainer.world_size) / 256,
+            lr=self.hparams.base_lr * (self.batch_size_per_device * self.trainer.world_size) / 256,
             momentum=0.9,
             weight_decay=1e-6,
         )

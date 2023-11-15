@@ -16,7 +16,7 @@ import torch
 from torch.optim import SGD
 
 from .base import BaseModule
-from .eval import OnlineLinearClassifier, kNNClassifier
+from .eval import OnlineLinearClassifier, OnlinekNNClassifier
 # TODO check https://github.com/facebookresearch/moco for correct implementation
 
 class MoCo(BaseModule):
@@ -27,7 +27,8 @@ class MoCo(BaseModule):
         projection_head_kwargs = dict(hidden_dim=512, output_dim=128),
         loss_kwargs = dict(memory_bank_size=4096),
         online_linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1),
-        online_knn_head_kwargs = dict(num_classes=10, k=20)
+        online_knn_head_kwargs = dict(num_classes=10, k=20),
+        optimizer_kwargs = dict(base_lr=0.03)
     ):
         super().__init__(
             backbone, 
@@ -40,7 +41,7 @@ class MoCo(BaseModule):
                 input_dim=backbone.output_dim, 
                 **online_linear_head_kwargs
             ),
-            online_knn_head=kNNClassifier(
+            online_knn_head=OnlinekNNClassifier(
                 **online_knn_head_kwargs
             )
         )
@@ -60,6 +61,7 @@ class MoCo(BaseModule):
         self.save_hyperparameters(loss_kwargs)
         self.save_hyperparameters(online_linear_head_kwargs)
         self.save_hyperparameters(online_knn_head_kwargs)
+        self.save_hyperparameters(optimizer_kwargs)
         
     def forward(self, x):
         z = self.backbone(x)
@@ -119,7 +121,7 @@ class MoCo(BaseModule):
                     "weight_decay": 0.0,
                 },
             ],
-            lr=0.03 * self.batch_size_per_device * self.trainer.world_size / 256,
+            lr=self.hparams.base_lr * self.batch_size_per_device * self.trainer.world_size / 256,
             momentum=0.9,
             weight_decay=1e-4,
         )

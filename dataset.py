@@ -208,7 +208,7 @@ def transform_builder(
             case "swav":
                 train_transform = SwaVTransform(
                     crop_sizes = [input_size,],
-                    crop_counts = 2,
+                    crop_counts = [2,],
                     crop_min_scales = [0.14,],
                     cj_strength = 0.5, 
                     gaussian_blur = 0

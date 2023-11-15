@@ -15,7 +15,7 @@ from torch.optim import SGD
 from torch.optim.optimizer import Optimizer
 
 from .base import BaseModule
-from .eval import OnlineLinearClassifier, kNNClassifier
+from .eval import OnlineLinearClassifier, OnlinekNNClassifier
 
 class DINO(BaseModule):
     def __init__(
@@ -25,7 +25,8 @@ class DINO(BaseModule):
         projection_head_kwargs = dict(hidden_dim=512, bottleneck_dim=64, output_dim=2048),
         loss_kwargs = dict(warmup_teacher_temp_epochs=5),
         online_linear_head_kwargs = dict(num_classes=10, label_smoothing=0.1),
-        online_knn_head_kwargs = dict(num_classes=10, k=20)
+        online_knn_head_kwargs = dict(num_classes=10, k=20),
+        optimizer_kwargs = dict(base_lr=0.03)
     ):
         super().__init__(
             backbone, 
@@ -38,7 +39,7 @@ class DINO(BaseModule):
                 input_dim=backbone.output_dim, 
                 **online_linear_head_kwargs
             ),
-            online_knn_head=kNNClassifier(
+            online_knn_head=OnlinekNNClassifier(
                 **online_knn_head_kwargs
             )
         )
@@ -46,7 +47,7 @@ class DINO(BaseModule):
         self.save_hyperparameters(loss_kwargs)
         self.save_hyperparameters(online_linear_head_kwargs)
         self.save_hyperparameters(online_knn_head_kwargs)
-        
+        self.save_hyperparameters(optimizer_kwargs)
         # teacher model dont freeze last layer
         projection_head_kwargs.pop("freeze_last_layer", None)
         self.teacher_backbone = copy.deepcopy(backbone)
@@ -100,9 +101,6 @@ class DINO(BaseModule):
             "target": targets
         }
 
-    # def on_after_backward(self):
-    #     self.projection_head.cancel_last_layer_gradients(current_epoch=self.current_epoch)
-        
     def configure_optimizers(self):
         # Don't use weight decay for batch norm, bias parameters, and classification
         # head to improve performance.
@@ -128,7 +126,7 @@ class DINO(BaseModule):
                     "weight_decay": 0.0,
                 },
             ],
-            lr=0.03 * self.batch_size_per_device * self.trainer.world_size / 256,
+            lr=self.hparams.base_lr * self.batch_size_per_device * self.trainer.world_size / 256,
             momentum=0.9,
             weight_decay=1e-4,
         )
@@ -146,15 +144,15 @@ class DINO(BaseModule):
         }
         return [optimizer], [scheduler]
     
-    # def configure_gradient_clipping(
-    #     self,
-    #     optimizer: Optimizer,
-    #     gradient_clip_val: Union[int, float, None] = None,
-    #     gradient_clip_algorithm: Union[str, None] = None,
-    # ) -> None:
-    #     self.clip_gradients(
-    #         optimizer=optimizer,
-    #         gradient_clip_val=gradient_clip_val or 2.0,
-    #         gradient_clip_algorithm=gradient_clip_algorithm or "norm",
-    #     )
-    #     self.projection_head.cancel_last_layer_gradients(self.current_epoch)
+    def configure_gradient_clipping(
+        self,
+        optimizer: Optimizer,
+        gradient_clip_val: Union[int, float, None] = None,
+        gradient_clip_algorithm: Union[str, None] = None,
+    ) -> None:
+        self.clip_gradients(
+            optimizer=optimizer,
+            gradient_clip_val=gradient_clip_val or 3.0,
+            gradient_clip_algorithm=gradient_clip_algorithm or "norm",
+        )
+        self.projection_head.cancel_last_layer_gradients(self.current_epoch)

@@ -1,5 +1,3 @@
-from pytorch_lightning.accelerators import find_usable_cuda_devices
-
 def config_builder(args):
     match args.dataset:
         case "cifar10":
@@ -36,11 +34,19 @@ def config_builder(args):
                     hidden_dim = 8192,
                     output_dim = 8192,
                 )
+                model_config["optimizer_kwargs"] = dict(
+                    base_lr=0.2, 
+                    no_weight_decay_base_lr=0.0048
+                )
 
             else:
                 model_config["projection_head_kwargs"] = dict(
                     hidden_dim = 2048,
                     output_dim = 2048,
+                )
+                model_config["optimizer_kwargs"] = dict(
+                    base_lr=0.06, 
+                    no_weight_decay_base_lr=0.06
                 )
                 
         case "byol":
@@ -53,6 +59,9 @@ def config_builder(args):
                     hidden_dim = 4096,
                     output_dim = 256,
                 )
+                model_config["optimizer_kwargs"] = dict(
+                    base_lr=0.06, 
+                )
             else:
                 model_config["projection_head_kwargs"] = dict(
                     hidden_dim = 1024,
@@ -62,6 +71,10 @@ def config_builder(args):
                     hidden_dim = 1024,
                     output_dim = 256,
                 )
+                model_config["optimizer_kwargs"] = dict(
+                    base_lr=0.45, 
+                )
+                
         
         case "dino":
             if args.dataset == "imagenet":
@@ -73,13 +86,15 @@ def config_builder(args):
                     freeze_last_layer = -1,
                     norm_last_layer = True
                 )
-                
                 model_config["loss_kwargs"] = dict(
                     warmup_teacher_temp = 0.04,
                     teacher_temp = 0,
                     warmup_teacher_temp_epochs = 30,
                     student_temp = 0.1,
                     center_momentum = 0.9
+                )
+                model_config["optimizer_kwargs"] = dict(
+                    base_lr=0.03
                 )
             
             else:
@@ -91,13 +106,15 @@ def config_builder(args):
                     freeze_last_layer = -1,
                     norm_last_layer = True
                 )
-                
                 model_config["loss_kwargs"] = dict(
                     warmup_teacher_temp = 0.04,
                     teacher_temp = 0,
                     warmup_teacher_temp_epochs = 30,
                     student_temp = 0.1,
                     center_momentum = 0.9
+                )
+                model_config["optimizer_kwargs"] = dict(
+                    base_lr=0.06
                 )
         
         case "moco":
@@ -106,10 +123,12 @@ def config_builder(args):
                     hidden_dim = 2048,  
                     output_dim = 65536,
                 )
-                
                 model_config["loss_kwargs"] = dict(
                     temperature = 0.1,
                     memory_bank_size = 4096
+                )
+                model_config["optimizer_kwargs"] = dict(
+                    base_lr=0.03
                 )
             
             else:
@@ -117,10 +136,12 @@ def config_builder(args):
                     hidden_dim = 2048,  
                     output_dim = 2048,
                 )
-                
                 model_config["loss_kwargs"] = dict(
                     temperature = 0.1,
                     memory_bank_size = 4096
+                )
+                model_config["optimizer_kwargs"] = dict(
+                    base_lr=0.06
                 )
 
         case "simclr":
@@ -129,9 +150,11 @@ def config_builder(args):
                     hidden_dim = 2048,  
                     output_dim = 2048,
                 )
-                
                 model_config["loss_kwargs"] = dict(
                     temperature = 0.1,
+                )
+                model_config["optimizer_kwargs"] = dict(
+                    base_lr=0.3
                 )
             
             else:
@@ -139,9 +162,11 @@ def config_builder(args):
                     hidden_dim = 512,  
                     output_dim = 128,
                 )
-                
                 model_config["loss_kwargs"] = dict(
                     temperature = 0.5,
+                )
+                model_config["optimizer_kwargs"] = dict(
+                    base_lr=0.06
                 )
 
         case "swav":
@@ -150,9 +175,11 @@ def config_builder(args):
                     hidden_dim = 2048,  
                     output_dim = 2048,
                 )
-                
                 model_config["prototype_kwargs"] = dict(
                     n_prototypes = 3000
+                )
+                model_config["optimizer_kwargs"] = dict(
+                    base_lr=0.6
                 )
             
             else:
@@ -160,9 +187,11 @@ def config_builder(args):
                     hidden_dim = 512,  
                     output_dim = 128,
                 )
-                
                 model_config["prototype_kwargs"] = dict(
                     n_prototypes = 3000
+                )
+                model_config["optimizer_kwargs"] = dict(
+                    base_lr=0.001
                 )
         
         case "vicreg":
@@ -172,6 +201,9 @@ def config_builder(args):
                     output_dim = 8192,
                     num_layers = 3,
                 )
+                model_config["optimizer_kwargs"] = dict(
+                    base_lr=0.8
+                )
                 
             else:
                 model_config["projection_head_kwargs"] = dict(
@@ -179,6 +211,10 @@ def config_builder(args):
                     output_dim = 2048,
                     num_layers = 3,
                 )
+                model_config["optimizer_kwargs"] = dict(
+                    base_lr=0.8
+                )
+                
         case _:
             raise NotImplementedError(f"SSL {args.ssl} not implemented.")
                
