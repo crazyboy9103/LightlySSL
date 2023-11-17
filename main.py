@@ -1,12 +1,11 @@
 from typing import List, Dict, Literal
 import os
-from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 import torch
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint, ModelSummary, LearningRateMonitor
-from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
-from pytorch_lightning.accelerators import find_usable_cuda_devices
+import lightning.pytorch as pl
+from lightning.pytorch.callbacks import ModelCheckpoint, ModelSummary, LearningRateMonitor
+from lightning.pytorch.loggers import WandbLogger, TensorBoardLogger
+from lightning.pytorch.accelerators import find_usable_cuda_devices
 
 from dataset import dataset_builder, DataModule
 from backbone import backbone_builder
@@ -103,7 +102,7 @@ def trainer_builder(
         devices=devices,
         log_every_n_steps=1,
         strategy="ddp" if len(devices) > 1 else "auto", 
-        num_sanity_val_steps=0,
+        num_sanity_val_steps=0, # must be 0 
         use_distributed_sampler = True,
     )
     return trainer

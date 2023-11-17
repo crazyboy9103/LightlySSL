@@ -11,7 +11,7 @@ from torch import nn
 from torch.nn import functional as F
 import torchmetrics
 from torchmetrics.functional.pairwise import pairwise_cosine_similarity
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 
 class kNNClassifier(pl.LightningModule):
     def __init__(
@@ -67,12 +67,19 @@ class kNNClassifier(pl.LightningModule):
         
         # at validation time, we add knn predictions to the torchmetrics 
         else:
-            if self.z_train_gathered == None and self.y_train_gathered == None:
+            if (self.z_train_gathered == None 
+                and self.y_train_gathered == None 
+                and torch.cuda.device_count() > 1 
+                and self.trainer.world_size > 1):
                 self.z_train_gathered = self.all_gather(torch.cat(self.z_train))
                 self.y_train_gathered = self.all_gather(torch.cat(self.y_train))
                 self.z_train_gathered = self.z_train_gathered.view(-1, self.z_train_gathered.shape[-1])
                 self.y_train_gathered = self.y_train_gathered.view(-1)
 
+            else:
+                self.z_train_gathered = torch.cat(self.z_train)
+                self.y_train_gathered = torch.cat(self.y_train)
+                
             knn_yhat = self.knn_predict(z_hat.detach(), self.z_train_gathered, self.y_train_gathered)
 
             self.accuracy(knn_yhat, y)

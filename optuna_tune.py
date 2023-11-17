@@ -1,7 +1,5 @@
-import os
-
 import torch
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 from pytorch_lightning.callbacks import ModelSummary, LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.accelerators import find_usable_cuda_devices
@@ -22,16 +20,19 @@ def main(args):
     devices = find_usable_cuda_devices(args.num_gpus)
     metric_name = "valid/online-linear-accuracy"
     experiment_name = f'{args.ssl}_{args.backbone}_{args.dataset}_tune'
- 
+    seeded_generator = torch.Generator().manual_seed(args.seed)
 
+    PERCENT_TRAIN_EXAMPLES = 0.1
+    PERCENT_VALID_EXAMPLES = 0.1
+    
     def lr_objective(trial: optuna.trial.Trial) -> float:
         base_lr = model_config["optimizer_kwargs"]["base_lr"]
-        base_lr = trial.suggest_float("base_lr", base_lr / 10, base_lr * 10, log=True)
+        base_lr = trial.suggest_float("base_lr", base_lr / 10, base_lr * 10)
         model_config["optimizer_kwargs"]["base_lr"] = base_lr
         
         if args.ssl == "barlowtwins":
             no_weight_decay_base_lr = model_config["optimizer_kwargs"]["no_weight_decay_base_lr"]            
-            no_weight_decay_base_lr = trial.suggest_float("no_weight_decay_base_lr", no_weight_decay_base_lr / 10, no_weight_decay_base_lr * 10, log=True)
+            no_weight_decay_base_lr = trial.suggest_float("no_weight_decay_base_lr", no_weight_decay_base_lr / 10, no_weight_decay_base_lr * 10)
             model_config["optimizer_kwargs"]["no_weight_decay_base_lr"] = no_weight_decay_base_lr
         
         backbone = backbone_builder(
@@ -70,9 +71,9 @@ def main(args):
             precision="16-mixed",
             benchmark=True,
             enable_checkpointing=False,
-            # limit_val_batches=PERCENT_VALID_EXAMPLES,
+            limit_train_batches=PERCENT_TRAIN_EXAMPLES,
+            limit_val_batches=PERCENT_VALID_EXAMPLES,
             callbacks=[
-                ModelSummary(max_depth=-1),
                 LearningRateMonitor(logging_interval="step"),
                 pruning_callback
             ],
@@ -91,7 +92,8 @@ def main(args):
         data_loader_kwargs = dict(
             batch_size=args.batch_size,
             num_workers=args.num_workers,
-            generator=torch.Generator().manual_seed(args.seed),
+            generator=seeded_generator,
+            # persistent_workers=True,
         )
         
         datamodule = DataModule(train_data, test_data, data_loader_kwargs)
@@ -104,17 +106,19 @@ def main(args):
         pruning_callback.check_pruned()
         return trainer.callback_metrics[metric_name].item()
     
-    pruner: optuna.pruners.BasePruner = (optuna.pruners.MedianPruner() )
+    sampler = optuna.samplers.RandomSampler(seed=args.seed)    
+    pruner = optuna.pruners.HyperbandPruner() 
 
-    storage = "sqlite:///example.db"
+    storage = f"sqlite:///tune.db"
     study = optuna.create_study(
-        study_name="pl_ddp",
+        sampler=sampler,
+        pruner=pruner,
+        study_name=f"{args.ssl}_{args.dataset}",
         storage=storage,
         direction="maximize",
-        pruner=pruner,
         load_if_exists=True,
     )
-    study.optimize(lr_objective, n_trials=100, timeout=600)
+    study.optimize(lr_objective, n_trials=20, timeout=300)
 
     print("Number of finished trials: {}".format(len(study.trials)))
 
