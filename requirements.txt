@@ -9,4 +9,6 @@ torchvision
 tqdm
 wandb
 tensorboard
-optuna
+ray[tune]
+hpbandster
+ConfigSpace
