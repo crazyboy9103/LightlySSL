@@ -247,16 +247,16 @@ def dataset_builder(
     }[dataset]
     
     if dataset in ("cifar10", "cifar100"):
-        with FileLock(f"{data_root}.lock"):
-            train_data = data(root = data_root, train = True, download = True)
-            test_data = data(root = data_root, train = False, download = True)
+        # with FileLock(f"{data_root}.lock"):
+        train_data = data(root = data_root, train = True, download = True)
+        test_data = data(root = data_root, train = False, download = True)
         # train_data = data(root = data_root, train = True, download = True)
         # test_data = data(root = data_root, train = False, download = True)
         
     elif dataset == "imagenet":
-        with FileLock(f"{data_root}.lock"):
-            train_data = data(root = os.path.join(data_root, "train"), split = 'train')
-            test_data = data(root = os.path.join(data_root, "val"), split = 'val')
+        # with FileLock(f"{data_root}.lock"):
+        train_data = data(root = os.path.join(data_root, "train"), split = 'train')
+        test_data = data(root = os.path.join(data_root, "val"), split = 'val')
         
     elif dataset == "stl10":
         # TODO 

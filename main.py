@@ -84,7 +84,7 @@ def trainer_builder(
     metric_mode, 
     epochs
 ):
-    os.makedirs(checkpoint_path, exist_ok=True)
+    # os.makedirs(checkpoint_path, exist_ok=True)
     
     trainer = pl.Trainer(
         logger=logger, 
@@ -93,7 +93,7 @@ def trainer_builder(
         benchmark=True,
         callbacks=[
             MetricTracker([{"name": metric_name, "mode": metric_mode, "interval": "epoch"}]),
-            ModelCheckpoint(dirpath=checkpoint_path, save_top_k=2, monitor=metric_name, mode=metric_mode),
+            ModelCheckpoint(dirpath=checkpoint_path, save_top_k=1, monitor=metric_name, mode=metric_mode, auto_insert_metric_name=False),
             ModelSummary(max_depth=-1),
             LearningRateMonitor(logging_interval="step")
         ],
@@ -150,10 +150,11 @@ def main(args):
         
         model = models[args.ssl](backbone, args.batch_size, **model_config)
         
+        
         # model = torch.compile(model)
         pretrainer = trainer_builder(
             devices,
-            f'./checkpoints/ssl/{args.ssl}/{args.backbone}/{args.dataset}', 
+            f'./checkpoints/ssl/{args.ssl}/{args.backbone}/{args.dataset}/ssl_model', 
             logger,
             "valid/online-linear-accuracy", # "train/ssl-loss", "train/online-linear-loss", "valid/online-linear-loss", "train/online-linear-accuracy", "valid/online-linear-accuracy"
             "max",
@@ -179,7 +180,7 @@ def main(args):
     def evaluate():
         evaluator = trainer_builder(
             devices,
-            f'./checkpoints/sl/{args.sl}/{args.backbone}/{args.dataset}', 
+            f'./checkpoints/sl/{args.sl}/{args.backbone}/{args.dataset}/sl_model', 
             logger,
             "valid/linear-accuracy", # "train/linear-loss", "valid/linear-loss", "train/linear-accuracy", "valid/linear-accuracy"
             "max",
@@ -201,6 +202,9 @@ def main(args):
             backbone, 
             args.batch_size,
             model_config["online_linear_head_kwargs"]["num_classes"],
+            args.sl,
+            args.label_smoothing,
+            args.k
         )
         evaluator.fit(
             model, 

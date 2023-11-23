@@ -2,23 +2,36 @@ import torch
 import lightning.pytorch as pl
 from lightning.pytorch.loggers import WandbLogger
 
+
+from ray import tune
+from ray.tune.schedulers import HyperBandForBOHB
+from ray.tune.search.bohb import TuneBOHB
+from ray.train import (
+    RunConfig, 
+    ScalingConfig, 
+    CheckpointConfig
+)
+from ray.train.torch import TorchTrainer
 from ray.train.lightning import (
     RayDDPStrategy,
     RayLightningEnvironment,
     RayTrainReportCallback,
     prepare_trainer,
 )
-from ray.train import RunConfig, ScalingConfig, CheckpointConfig
-from ray.train.torch import TorchTrainer
-from ray import tune
-from ray.tune.schedulers import HyperBandForBOHB
-from ray.tune.search.bohb import TuneBOHB
 
 
 from dataset import dataset_builder, DataModule
 from backbone import backbone_builder
 from config import config_builder
-from modules import BarlowTwins, BYOL, DINO, MoCo, SimCLR, SwAV, VICReg
+from modules import (
+    BarlowTwins, 
+    BYOL, 
+    DINO, 
+    MoCo, 
+    SimCLR, 
+    SwAV, 
+    VICReg
+)
 
 def main(args):
     pl.seed_everything(args.seed)
@@ -40,15 +53,17 @@ def main(args):
         ),
     )
     
-    base_lr = model_config["optimizer_kwargs"]["base_lr"]
+    # base_lr = model_config["optimizer_kwargs"]["base_lr"]
     
+    base_lr = 0.01
     search_space = {
-        "base_lr": tune.loguniform(base_lr / 100, min(base_lr * 100, 1), base=10),
+        "base_lr": tune.loguniform(base_lr / 100, base_lr * 100, base=10),
     }
     
     if args.ssl == "barlowtwins":
-        no_weight_decay_base_lr = model_config["optimizer_kwargs"]["no_weight_decay_base_lr"]   
-        search_space["no_weight_decay_base_lr"] = tune.loguniform(no_weight_decay_base_lr / 100, min(no_weight_decay_base_lr * 100, 1), base=10)
+        # no_weight_decay_base_lr = model_config["optimizer_kwargs"]["no_weight_decay_base_lr"]   
+        no_weight_decay_base_lr = 0.01
+        search_space["no_weight_decay_base_lr"] = tune.loguniform(no_weight_decay_base_lr / 100, no_weight_decay_base_lr * 100, base=10)
     
     def train_func(config):
         model_config["optimizer_kwargs"]["base_lr"] = config["base_lr"]

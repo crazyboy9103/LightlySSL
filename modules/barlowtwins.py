@@ -92,7 +92,7 @@ class BarlowTwins(BaseModule):
                 optimizer=optimizer,
                 warmup_epochs=int(
                     self.trainer.estimated_stepping_batches
-                    / self.trainer.max_epochs
+                    / self.trainer.max_epochs # steps per epoch * epochs
                     * 10
                 ),
                 max_epochs=int(self.trainer.estimated_stepping_batches),

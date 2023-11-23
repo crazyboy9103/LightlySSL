@@ -45,8 +45,8 @@ def config_builder(args):
                     output_dim = 2048,
                 )
                 model_config["optimizer_kwargs"] = dict(
-                    base_lr=0.06, 
-                    no_weight_decay_base_lr=0.06
+                    base_lr=0.3, 
+                    no_weight_decay_base_lr=0.3
                 )
                 
         case "byol":
@@ -60,7 +60,7 @@ def config_builder(args):
                     output_dim = 256,
                 )
                 model_config["optimizer_kwargs"] = dict(
-                    base_lr=0.06, 
+                    base_lr=0.45, 
                 )
             else:
                 model_config["projection_head_kwargs"] = dict(
@@ -72,7 +72,7 @@ def config_builder(args):
                     output_dim = 256,
                 )
                 model_config["optimizer_kwargs"] = dict(
-                    base_lr=0.45, 
+                    base_lr=0.85, 
                 )
                 
         
@@ -83,7 +83,7 @@ def config_builder(args):
                     bottleneck_dim = 256,
                     output_dim = 65536,
                     batch_norm = False, 
-                    freeze_last_layer = -1,
+                    freeze_last_layer = 1,
                     norm_last_layer = True
                 )
                 model_config["loss_kwargs"] = dict(
@@ -103,18 +103,18 @@ def config_builder(args):
                     bottleneck_dim = 256,
                     output_dim = 2048,
                     batch_norm = True, 
-                    freeze_last_layer = -1,
+                    freeze_last_layer = 1,
                     norm_last_layer = True
                 )
                 model_config["loss_kwargs"] = dict(
                     warmup_teacher_temp = 0.04,
-                    teacher_temp = 0,
+                    teacher_temp = 0.07,
                     warmup_teacher_temp_epochs = 30,
                     student_temp = 0.1,
                     center_momentum = 0.9
                 )
                 model_config["optimizer_kwargs"] = dict(
-                    base_lr=0.06
+                    base_lr=0.34
                 )
         
         case "moco":
@@ -141,7 +141,7 @@ def config_builder(args):
                     memory_bank_size = 4096
                 )
                 model_config["optimizer_kwargs"] = dict(
-                    base_lr=0.06
+                    base_lr=0.15
                 )
 
         case "simclr":
@@ -166,7 +166,7 @@ def config_builder(args):
                     temperature = 0.5,
                 )
                 model_config["optimizer_kwargs"] = dict(
-                    base_lr=0.06
+                    base_lr=0.9
                 )
 
         case "swav":
@@ -191,7 +191,7 @@ def config_builder(args):
                     n_prototypes = 3000
                 )
                 model_config["optimizer_kwargs"] = dict(
-                    base_lr=0.001
+                    base_lr=0.4
                 )
         
         case "vicreg":

@@ -1,6 +1,7 @@
+import os 
+
 import torch
 from torch import nn
-from torchvision import models
 import timm
 
 AVAILABLE_BACKBONES = [
@@ -34,6 +35,9 @@ def backbone_builder(backbone_name, checkpoint_path=""):
     
     # TODO: load checkpoint using LightningModule.load_from_checkpoint
     if checkpoint_path:
+        if not checkpoint_path.endswith(".ckpt"):
+            checkpoint_path = os.path.join(checkpoint_path, os.listdir(checkpoint_path)[0])
+            
         checkpoint = torch.load(checkpoint_path, map_location="cpu")["state_dict"]
         checkpoint_buffer = {}
         for key, value in checkpoint.items():
