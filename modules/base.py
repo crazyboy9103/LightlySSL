@@ -38,10 +38,13 @@ class BaseModule(pl.LightningModule):
         
         cls_loss, cls_loss_dict = self.online_linear_head.training_step((embedding, target), batch_index)
         self.online_knn_head.training_step((embedding, target), batch_index)
-        self.log_dict({
+        loss_dict = {
             "train/ssl-loss": ssl_loss,
             **cls_loss_dict
-        }, sync_dist=self.is_distributed)
+        }
+        self.log_dict(loss_dict, sync_dist=self.is_distributed)
+        # log minimum loss
+        self.log_dict({f"min_{k}": v for k, v in loss_dict.items()}, sync_dist=self.is_distributed, reduce_fx="min")
         return ssl_loss + cls_loss
 
     def validation_step(self, batch, batch_index):
@@ -50,11 +53,16 @@ class BaseModule(pl.LightningModule):
         _, loss_dict = self.online_linear_head.validation_step((z, y), batch_index)
         self.online_knn_head.validation_step((z, y), batch_index)
         self.log_dict(loss_dict, sync_dist=self.is_distributed)
+        # log minimum loss
+        self.log_dict({f"min_{k}": v for k, v in loss_dict.items()}, sync_dist=self.is_distributed, reduce_fx="min")
     
     def on_validation_epoch_end(self):
         linear_metrics = self.online_linear_head.on_validation_epoch_end()
         knn_metrics = self.online_knn_head.on_validation_epoch_end()
-        self.log_dict({**linear_metrics, **knn_metrics}, sync_dist=self.is_distributed)
+        metrics = {**linear_metrics, **knn_metrics}
+        self.log_dict(metrics, sync_dist=self.is_distributed)
+        # log maximum metric
+        self.log_dict({f"max_{k}": v for k, v in metrics.items()}, sync_dist=self.is_distributed, reduce_fx="max")
     
     def on_train_epoch_end(self):
         # self.backbone.eval()
@@ -69,4 +77,6 @@ class BaseModule(pl.LightningModule):
         # self.backbone.train()
         metrics = self.online_linear_head.on_train_epoch_end()
         self.log_dict(metrics, sync_dist=self.is_distributed)
+        # log maximum metric
+        self.log_dict({f"max_{k}": v for k, v in metrics.items()}, sync_dist=self.is_distributed, reduce_fx="max")
         

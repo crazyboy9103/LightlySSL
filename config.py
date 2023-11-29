@@ -212,7 +212,7 @@ def config_builder(args):
                     num_layers = 3,
                 )
                 model_config["optimizer_kwargs"] = dict(
-                    base_lr=0.8
+                    base_lr=0.4
                 )
                 
         case _:

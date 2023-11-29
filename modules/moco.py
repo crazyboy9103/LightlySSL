@@ -83,13 +83,20 @@ class MoCo(BaseModule):
         update_momentum(self.backbone, self.backbone_momentum, m=momentum)
         update_momentum(self.projection_head, self.projection_head_momentum, m=momentum)
         (x_query, x_key), y = batch
-        z_query, query = self.forward(x_query)
-        with torch.no_grad():
-            x_key, shuffle = batch_shuffle(x_key, distributed=self.is_distributed)
-            _, key = self.forward_momentum(x_key)
-            key = batch_unshuffle(key, shuffle, distributed=self.is_distributed)
         
-        loss = 0.5 * (self.criterion(query, key) + self.criterion(key, query))
+        def step(x0, x1):
+            x1, shuffle = batch_shuffle(x1, distributed=self.is_distributed)
+            z0, x0 = self.forward(x0)
+            _, x1 = self.forward_momentum(x1)
+            x1 = batch_unshuffle(x1, shuffle, distributed=self.is_distributed)
+            return z0, x0, x1 
+        
+        z_query, query, key = step(x_query, x_key)
+        loss1 = self.criterion(query, key)
+        _,       key, query = step(x_key, x_query)
+        loss2 = self.criterion(key, query)
+        
+        loss = 0.5 * (loss1 + loss2)
         return {
             "loss": loss, 
             "embedding": z_query.detach(),
